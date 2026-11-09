@@ -11,7 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cielo">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png?v=2">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
@@ -138,6 +138,26 @@ nav svg{width:24px;height:24px}
 .search input{flex:1;border:0;background:none;outline:none;font-size:16px}
 .res button{display:block;width:100%;text-align:left;padding:12px 2px;border-bottom:.5px solid var(--line)}
 .res button span{color:var(--mute);font-size:13px}
+#btn-fav svg{width:18px;height:18px}
+.res:not(:empty) + #favs{display:none}
+#btn-fav.on{color:#f5b301}
+.favh{display:flex;justify-content:space-between;align-items:baseline;margin:22px 0 6px}
+.favh h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);font-weight:600;margin:0}
+.favh button{font-size:14px;font-weight:600;color:var(--m-arome)}
+.fav{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:.5px solid var(--line)}
+.fav:last-child{border-bottom:0}
+.fav .go{flex:1;min-width:0;text-align:left;display:flex;align-items:center;gap:12px}
+.fav .nm{font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fav .ad{font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fav .cur{width:7px;height:7px;border-radius:50%;background:var(--m-arome);flex:none}
+.fav .wx{display:flex;align-items:center;gap:6px;font-size:20px;font-weight:450;flex:none}
+.fav .wx svg{width:24px;height:24px}
+.fav .del,.fav .mv{width:28px;height:28px;border-radius:14px;display:none;place-items:center;flex:none}
+.fav .del{background:#ff453a;color:#fff}
+.fav .mv{background:var(--soft);color:var(--mute)}
+#favs.edit .del,#favs.edit .mv{display:grid}
+#favs.edit .wx{display:none}
+.favempty{font-size:13px;color:var(--mute);padding:10px 0 4px;line-height:1.45}
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;border-radius:14px;background:var(--card);font-weight:600;margin-top:10px}
 .btn.pri{background:var(--ink);color:var(--bg)}
 .tog{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:.5px solid var(--line)}
@@ -148,6 +168,26 @@ nav svg{width:24px;height:24px}
 .sw.on::after{left:21px}
 .toast{position:fixed;left:50%;top:calc(var(--safe-t) + 60px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:20px;font-size:13px;z-index:3000;opacity:0;transition:opacity .25s;pointer-events:none;max-width:86%;text-align:center}
 .toast.on{opacity:1}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{background:var(--card);border-radius:18px;padding:12px 14px;min-width:0}
+.tile .lbl{font-size:12px;color:var(--mute)}
+.tile .foot{font-size:11.5px;color:var(--mute);margin-top:8px;line-height:1.4}
+.arc{width:100%;height:auto;display:block;margin-top:2px}
+.sunrow{display:flex;justify-content:space-between;margin-top:4px}
+.sunrow span{display:block;font-size:11px;color:var(--mute)}
+.sunrow b{font-size:17px;font-weight:550}
+.aqi{display:flex;align-items:center;gap:8px;margin-top:6px}
+.aqi b{font-size:34px;font-weight:300;letter-spacing:-1px;line-height:1}
+.aqi i{width:10px;height:10px;border-radius:50%}
+.aqil{font-weight:600;font-size:14px;margin-top:2px}
+.aqibar{position:relative;height:5px;border-radius:3px;margin-top:8px;background:linear-gradient(90deg,#50c8a0 0 20%,#4fb05a 20% 40%,#e8c33a 40% 60%,#f08a3c 60% 80%,#e0453a 80% 100%)}
+.aqibar i{position:absolute;top:-3px;width:3px;height:11px;border-radius:2px;background:var(--ink);transform:translateX(-50%)}
+.storm .sth{display:flex;align-items:center;gap:12px}
+.sti{width:36px;height:36px}
+.stl{font-weight:600;font-size:16px}
+.cells{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:12px}
+.cells i{height:16px;border-radius:3px}
+.cellax{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mute);margin-top:4px}
 .skel{color:var(--mute);text-align:center;padding:60px 0}
 .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -160,6 +200,7 @@ nav svg{width:24px;height:24px}
       <div class="n"><span id="pname">Cargando…</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4.5l3 3 3-3"/></svg></div>
       <div class="s" id="pstat">&nbsp;</div>
     </button>
+    <button class="icon-btn" id="btn-fav" aria-label="Guardar en favoritas"></button>
     <button class="icon-btn" id="btn-refresh" aria-label="Actualizar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg></button>
     <button class="icon-btn" id="btn-set" aria-label="Ajustes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
   </header>
@@ -192,6 +233,7 @@ nav svg{width:24px;height:24px}
     <input id="q" type="search" placeholder="Buscar municipio" autocomplete="off" enterkeyhint="search"></div>
   <button class="btn" id="btn-gps"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3L3 10.5l7.5 2.9L13.4 21z"/></svg>Usar mi ubicación</button>
   <div class="res" id="res"></div>
+  <div id="favs"></div>
 </div>
 <div class="sheet" id="sh-set">
   <div class="grab"></div>
@@ -205,7 +247,7 @@ nav svg{width:24px;height:24px}
   <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
   <div class="card" id="mtog"></div>
   <button class="btn pri" id="btn-save">Guardar</button>
-  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), Servei Meteorològic de Catalunya, ECMWF, DWD (ICON). Radar: RainViewer. Mapa: © OpenStreetMap, © CARTO.</p>
+  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), Servei Meteorològic de Catalunya, ECMWF, DWD (ICON). Calidad del aire: Copernicus CAMS vía Open-Meteo. Radar: RainViewer. Mapa: © OpenStreetMap, © CARTO.</p>
 </div>
 <div class="toast" id="toast"></div>
 

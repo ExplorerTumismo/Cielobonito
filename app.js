@@ -13,7 +13,7 @@ const MODELS = {
 };
 const ORDER = ['aemet', 'arome', 'meteocat', 'ecmwf', 'icon'];
 const OM_MODELS = { arome: 'meteofrance_arome_france', ecmwf: 'ecmwf_ifs025', icon: 'icon_seamless' };
-const OM_VARS = 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,relative_humidity_2m,cloud_cover,is_day';
+const OM_VARS = 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,relative_humidity_2m,cloud_cover,is_day,cape,lifted_index,lightning_potential';
 const CAT_BBOX = { s: 40.50, n: 42.90, w: 0.15, e: 3.35 };
 const HOUR = 3600e3;
 
@@ -128,7 +128,7 @@ function windDir(deg) { if (deg == null) return ''; return ['N', 'NE', 'E', 'SE'
 const DIRDEG = { N: 0, NE: 45, E: 90, SE: 135, S: 180, SO: 225, SW: 225, O: 270, W: 270, NO: 315, NW: 315, C: null };
 
 // ───────────────────────── serie normalizada ─────────────────────────
-function emptySeries() { return { t: [], temp: [], feel: [], precip: [], pop: [], wind: [], gust: [], dir: [], hum: [], cloud: [], cat: [], day: [] }; }
+function emptySeries() { return { t: [], temp: [], feel: [], precip: [], pop: [], wind: [], gust: [], dir: [], hum: [], cloud: [], cat: [], day: [], cape: [], li: [], ltg: [], pstorm: [] }; }
 function fromMap(m) { // Map<epoch, obj> -> serie ordenada
   const s = emptySeries();
   [...m.keys()].sort((a, b) => a - b).forEach(t => { const o = m.get(t); s.t.push(t); for (const k of Object.keys(s)) if (k !== 't') s[k].push(o[k] ?? null); });
@@ -168,6 +168,7 @@ async function fetchOpenMeteo(lat, lon) {
       map.set(ts * 1000, {
         temp, feel: g('apparent_temperature')[i], precip: g('precipitation')[i], wind: g('wind_speed_10m')[i], gust: g('wind_gusts_10m')[i],
         dir: g('wind_direction_10m')[i], hum: g('relative_humidity_2m')[i], cloud: g('cloud_cover')[i], cat: catWMO(g('weather_code')[i]), day: g('is_day')[i],
+        cape: g('cape')[i], li: g('lifted_index')[i], ltg: g('lightning_potential')[i],
       });
     });
     if (map.size) out[m] = fromMap(map);
@@ -224,11 +225,13 @@ async function fetchAEMET(lat, lon) {
       if (x.velocidad) { put(t, 'wind', num(x.velocidad[0])); put(t, 'dir', DIRDEG[x.direccion?.[0]] ?? null); }
       else if (x.value != null) put(t, 'gust', num(x.value));
     });
-    (d.probPrecipitacion || []).forEach(x => {
+    const spread6 = (arr, key) => (arr || []).forEach(x => {
       const p = String(x.periodo || ''); if (p.length !== 4) return;
       let a = +p.slice(0, 2), b = +p.slice(2); if (b <= a) b += 24;
-      for (let hr = a; hr < b; hr++) { const t = zoned(date, 0, tz) + hr * HOUR; if (map.has(t)) map.get(t).pop = num(x.value); }
+      for (let hr = a; hr < b; hr++) { const t = zoned(date, 0, tz) + hr * HOUR; if (map.has(t)) map.get(t)[key] = num(x.value); }
     });
+    spread6(d.probPrecipitacion, 'pop');
+    spread6(d.probTormenta, 'pstorm');
   }
   for (const [t, o] of map) if (o.temp == null) map.delete(t);
   const s = fromMap(map);
@@ -275,13 +278,63 @@ async function fetchMeteocat(lat, lon) {
   return s;
 }
 
+// Calidad del aire (CAMS Europa vía Open-Meteo, índice europeo EAQI)
+async function fetchAir(lat, lon) {
+  const j = await getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}`
+    + `&current=european_aqi,pm2_5,pm10,nitrogen_dioxide,ozone&hourly=european_aqi&timezone=auto&timeformat=unixtime&forecast_days=2`);
+  return { cur: j.current, t: (j.hourly?.time || []).map(x => x * 1000), aqi: j.hourly?.european_aqi || [] };
+}
+const AQI = [[20, 'Buena', '#50c8a0'], [40, 'Razonable', '#4fb05a'], [60, 'Moderada', '#e8c33a'], [80, 'Mala', '#f08a3c'], [100, 'Muy mala', '#e0453a'], [Infinity, 'Extremadamente mala', '#8e3a8f']];
+const aqiLevel = (v) => AQI.find(a => v <= a[0]);
+
+// Salida y puesta del sol (algoritmo astronómico de SunCalc / NOAA, sin red)
+function sunTimes(ms, lat, lon) {
+  const rad = Math.PI / 180, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397, J0 = 0.0009;
+  const d = ms / 864e5 - 0.5 + J1970 - J2000, lw = -lon * rad, phi = lat * rad;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const L = M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const transit = (a) => J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const noon = transit(ds);
+  const w = Math.acos((Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec)));
+  const set = transit(J0 + (w + lw) / (2 * Math.PI) + n), rise = noon - (set - noon);
+  const ms_ = (j) => (j + 0.5 - J1970) * 864e5;
+  return { rise: ms_(rise), set: ms_(set), noon: ms_(noon) };
+}
+
+// Riesgo de tormenta en las próximas 24 h combinando todos los modelos
+function stormRisk(from) {
+  const ms = active(), H = 24, perHour = Array(H).fill(0);
+  let capeMax = null, liMin = null, ltgMax = null, aemetP = null; const who = [];
+  ms.forEach(m => {
+    const s = S.data[m]; let hit = false;
+    s.t.forEach((t, i) => {
+      const k = Math.round((t - from) / HOUR); if (k < 0 || k >= H) return;
+      if (s.cat[i] === 'storm') { perHour[k]++; hit = true; }
+      if (s.cape?.[i] != null) capeMax = Math.max(capeMax ?? 0, s.cape[i]);
+      if (s.li?.[i] != null) liMin = Math.min(liMin ?? 99, s.li[i]);
+      if (s.ltg?.[i] != null) ltgMax = Math.max(ltgMax ?? 0, s.ltg[i]);
+      if (m === 'aemet' && s.pstorm?.[i] != null) aemetP = Math.max(aemetP ?? 0, s.pstorm[i]);
+    });
+    if (hit) who.push(m);
+  });
+  const frac = ms.length ? who.length / ms.length : 0;
+  let lvl = 0;
+  if (who.length || (capeMax >= 800 && liMin <= -1) || aemetP >= 30 || ltgMax >= 200) lvl = 1;
+  if (frac >= 0.5 || (capeMax >= 1500 && liMin <= -3) || aemetP >= 60) lvl = 2;
+  const hrs = perHour.map((c, k) => c ? k : -1).filter(k => k >= 0);
+  return { lvl, who, n: ms.length, perHour, capeMax, liMin, ltgMax, aemetP, win: hrs.length ? [from + hrs[0] * HOUR, from + (hrs.at(-1) + 1) * HOUR] : null };
+}
+
 // ───────────────────────── carga ─────────────────────────
 async function load(force = false) {
   const { lat, lon } = S.loc;
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
   const cache = LS.get('cache', null);
   if (!force && cache && cache.key === key && Date.now() - cache.at < 20 * 60e3) {
-    S.data = cache.data; S.status = cache.status; S.tz = cache.tz; S.fetchedAt = cache.at; render(); return;
+    S.data = cache.data; S.status = cache.status; S.tz = cache.tz; S.air = cache.air; S.fetchedAt = cache.at; render(); return;
   }
   $('#pstat').textContent = 'Actualizando…';
   S.status = {};
@@ -290,12 +343,13 @@ async function load(force = false) {
     S.enabled.aemet ? fetchAEMET(lat, lon).then(r => ({ aemet: r }), e => { S.status.aemet = e.message === 'nokey' ? 'Añade la API key en Ajustes' : e.message === 'lejos' ? 'Sin municipio cercano' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
     S.enabled.meteocat ? fetchMeteocat(lat, lon).then(r => ({ meteocat: r }), e => { S.status.meteocat = e.message === 'fuera' ? 'Solo Catalunya' : e.message === 'nokey' ? 'Añade la API key en Ajustes' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
   ];
-  const res = await Promise.all(jobs);
+  const airJob = fetchAir(lat, lon).then(a => { S.air = a; }, () => { S.air = null; });
+  const res = await Promise.all(jobs); await airJob;
   S.data = Object.assign({}, ...res);
   for (const m of ORDER) if (!S.enabled[m]) S.status[m] = 'Desactivado';
   S.fetchedAt = Date.now();
-  if (Object.keys(S.data).length) LS.set('cache', { key, at: S.fetchedAt, data: S.data, status: S.status, tz: S.tz });
-  else if (cache && cache.key === key) { S.data = cache.data; S.tz = cache.tz; S.fetchedAt = cache.at; toast('Sin conexión: mostrando la última predicción'); }
+  if (Object.keys(S.data).length) LS.set('cache', { key, at: S.fetchedAt, data: S.data, status: S.status, tz: S.tz, air: S.air });
+  else if (cache && cache.key === key) { S.data = cache.data; S.tz = cache.tz; S.air = cache.air; S.fetchedAt = cache.at; toast('Sin conexión: mostrando la última predicción'); }
   render();
 }
 
@@ -350,6 +404,8 @@ function renderNow() {
   }
   html += `</div></div>`;
 
+  html += renderExtras(now);
+
   // por modelo
   html += `<div class="sec"><h3>Ahora por modelo</h3><div class="card">`;
   for (const m of ORDER) {
@@ -386,6 +442,62 @@ function renderNow() {
   }
   html += `<p class="note">Temperatura principal: mediana de los modelos disponibles. La coincidencia mide la dispersión de temperatura entre ellos ahora mismo.</p>`;
   v.innerHTML = html;
+}
+
+function renderExtras(now) {
+  const { lat, lon } = S.loc;
+  const todayNoon = zoned(fmt(Date.now(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'), 12, S.tz);
+  const sun = sunTimes(todayNoon, lat, lon), tom = sunTimes(todayNoon + 864e5, lat, lon);
+  const len = sun.set - sun.rise, lenStr = `${Math.floor(len / HOUR)} h ${Math.round(len % HOUR / 60e3)} min`;
+  const diff = Math.round(((tom.set - tom.rise) - len) / 60e3);
+  // arco solar
+  const f = Math.max(0, Math.min(1, (Date.now() - sun.rise) / len)), up = Date.now() > sun.rise && Date.now() < sun.set;
+  const ax = 8 + f * 124, ay = 52 - Math.sin(f * Math.PI) * 40;
+  const arc = `<svg viewBox="0 0 140 58" class="arc"><path d="M8 52 Q70 -28 132 52" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="3 3"/>
+    <line x1="2" x2="138" y1="52" y2="52" stroke="var(--line)"/>${up ? `<circle cx="${ax}" cy="${ay}" r="6" fill="#f5b83d"/>` : ''}</svg>`;
+  const t2 = (ms) => fmt(ms, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+  let html = `<div class="sec"><h3>Sol y aire</h3><div class="duo">
+    <div class="tile">${arc}
+      <div class="sunrow num"><div><span>Salida</span><b>${t2(sun.rise)}</b></div><div style="text-align:right"><span>Puesta</span><b>${t2(sun.set)}</b></div></div>
+      <div class="foot num">${lenStr} de luz · ${diff >= 0 ? '+' : '−'}${Math.abs(diff)} min mañana</div></div>`;
+
+  const a = S.air?.cur;
+  if (a && a.european_aqi != null) {
+    const lv = aqiLevel(a.european_aqi);
+    const i0 = S.air.t.findIndex(t => t >= now);
+    const next = i0 < 0 ? [] : S.air.aqi.slice(i0, i0 + 24).filter(x => x != null);
+    const worst = next.length ? Math.max(...next) : null;
+    const pol = [['PM2,5', a.pm2_5], ['PM10', a.pm10], ['NO₂', a.nitrogen_dioxide], ['O₃', a.ozone]].filter(p => p[1] != null);
+    html += `<div class="tile"><span class="lbl">Calidad del aire</span>
+      <div class="aqi num"><b>${Math.round(a.european_aqi)}</b><i style="background:${lv[2]}"></i></div>
+      <div class="aqil">${lv[1]}</div>
+      <div class="aqibar"><i style="left:${Math.min(100, a.european_aqi) }%"></i></div>
+      <div class="foot num">${pol.map(p => `${p[0]} ${Math.round(p[1])}`).join(' · ')} µg/m³${worst != null && aqiLevel(worst) !== lv ? `<br>Próx. 24 h: hasta ${aqiLevel(worst)[1].toLowerCase()}` : ''}</div></div>`;
+  } else {
+    html += `<div class="tile"><span class="lbl">Calidad del aire</span><div class="foot" style="margin-top:20px">No disponible</div></div>`;
+  }
+  html += `</div></div>`;
+
+  // tormenta
+  const st = stormRisk(now);
+  const LV = [['Bajo', '#34c759', 'Sin tormentas previstas en las próximas 24 h'], ['Moderado', '#ff9f0a', 'Posibles tormentas'], ['Alto', '#ff453a', 'Tormentas probables']];
+  const L = LV[st.lvl];
+  const win = st.win ? ` · ${fmt(st.win[0], { weekday: 'short' })} ${hh(st.win[0])}–${hh(st.win[1])}` : '';
+  const cells = st.perHour.map((c, k) => `<i title="${hh(now + k * HOUR)}" style="opacity:${c ? 0.35 + 0.65 * c / Math.max(1, st.n) : 1};background:${c ? L[1] : 'var(--soft)'}"></i>`).join('');
+  const facts = [
+    `${st.who.length}/${st.n} modelos con tormenta${st.who.length ? ' (' + st.who.map(m => MODELS[m].name).join(', ') + ')' : ''}`,
+    st.aemetP != null ? `AEMET prob. ${Math.round(st.aemetP)}%` : null,
+    st.capeMax != null ? `CAPE máx. ${Math.round(st.capeMax)} J/kg` : null,
+    st.liMin != null && st.liMin < 99 ? `Índ. de elevación ${String(round(st.liMin, 1)).replace('.', ',')}` : null,
+  ].filter(Boolean);
+  html += `<div class="sec"><h3>Tormenta · próximas 24 h</h3><div class="tile storm">
+    <div class="sth"><div class="sti" style="color:${L[1]}">${icon('storm')}</div>
+      <div><div class="stl">Riesgo ${L[0].toLowerCase()}</div><div class="foot" style="margin:0">${st.lvl ? L[2] + win : L[2]}</div></div></div>
+    <div class="cells">${cells}</div>
+    <div class="cellax num"><span>${hh(now)}</span><span>${hh(now + 12 * HOUR)}</span><span>${hh(now + 24 * HOUR)}</span></div>
+    <div class="foot num">${facts.join(' · ')}</div></div></div>`;
+  return html;
 }
 
 // ───────────────────────── render: Meteograma ─────────────────────────
@@ -569,6 +681,7 @@ function show(view) {
   if (view === 'mg' && Object.keys(S.data).length) renderMG();
 }
 function render() {
+  updateFavBtn();
   $('#pname').textContent = S.loc.name || `${S.loc.lat.toFixed(2)}, ${S.loc.lon.toFixed(2)}`;
   const n = active().length;
   $('#pstat').textContent = S.fetchedAt ? `${n} modelos · actualizado ${new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(S.fetchedAt)}` : '';
@@ -576,6 +689,54 @@ function render() {
   if (S.view === 'mg') renderMG();
   placeMarker();
 }
+// ───────────────────────── favoritas ─────────────────────────
+const STAR = (on) => `<svg viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>`;
+S.favs = LS.get('favs', []);
+const sameLoc = (a, b) => Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+const favIndex = (loc = S.loc) => S.favs.findIndex(f => sameLoc(f, loc));
+const FAVWX = { at: 0, key: '', list: [] };
+function updateFavBtn() { const on = favIndex() >= 0; const b = $('#btn-fav'); b.innerHTML = STAR(on); b.classList.toggle('on', on); b.setAttribute('aria-label', on ? 'Quitar de favoritas' : 'Guardar en favoritas'); }
+function toggleFav() {
+  const i = favIndex();
+  if (i >= 0) { S.favs.splice(i, 1); toast(`${S.loc.name} eliminada de favoritas`); }
+  else { S.favs.push({ name: S.loc.name, admin: S.loc.admin || '', lat: S.loc.lat, lon: S.loc.lon }); toast(`${S.loc.name} guardada en favoritas`); }
+  LS.set('favs', S.favs); updateFavBtn();
+}
+async function loadFavWeather() {
+  const key = S.favs.map(f => f.lat.toFixed(2) + ',' + f.lon.toFixed(2)).join(';');
+  if (!S.favs.length || (key === FAVWX.key && Date.now() - FAVWX.at < 15 * 60e3)) return;
+  try {
+    const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${S.favs.map(f => f.lat).join(',')}&longitude=${S.favs.map(f => f.lon).join(',')}&current=temperature_2m,weather_code,is_day&timezone=auto`);
+    FAVWX.list = Array.isArray(j) ? j : [j]; FAVWX.key = key; FAVWX.at = Date.now();
+  } catch { /* sin conexión: la lista se muestra sin tiempo */ }
+}
+let favEdit = false;
+function renderFavs() {
+  const box = $('#favs');
+  box.classList.toggle('edit', favEdit);
+  if (!S.favs.length) {
+    box.innerHTML = `<div class="favh"><h3>Favoritas</h3></div><div class="favempty">Aún no tienes favoritas. Toca la ${STAR(false).replace('<svg', '<svg width="13" height="13" style="vertical-align:-2px"')} junto al nombre de la población para guardarla aquí.</div>`;
+    return;
+  }
+  const wxOk = FAVWX.key === S.favs.map(f => f.lat.toFixed(2) + ',' + f.lon.toFixed(2)).join(';');
+  box.innerHTML = `<div class="favh"><h3>Favoritas</h3><button id="fav-edit">${favEdit ? 'Hecho' : 'Editar'}</button></div><div class="card">` +
+    S.favs.map((f, i) => {
+      const w = wxOk ? FAVWX.list[i]?.current : null;
+      return `<div class="fav"><button class="del" data-del="${i}" aria-label="Eliminar ${esc(f.name)}"><svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" stroke-width="2"><path d="M2.5 6h7"/></svg></button>
+        <button class="go" data-go="${i}">${sameLoc(f, S.loc) ? '<i class="cur"></i>' : ''}<div style="min-width:0"><div class="nm">${esc(f.name)}</div><div class="ad">${esc(f.admin || `${f.lat.toFixed(2)}, ${f.lon.toFixed(2)}`)}</div></div></button>
+        <div class="wx num">${w ? icon(catWMO(w.weather_code), w.is_day === 0) + fmtT(w.temperature_2m) : ''}</div>
+        <button class="mv" data-up="${i}" aria-label="Subir" ${i ? '' : 'style="visibility:hidden"'}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7.5l3-3 3 3"/></svg></button></div>`;
+    }).join('') + `</div>`;
+  $('#fav-edit').onclick = () => { favEdit = !favEdit; renderFavs(); };
+  box.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { if (favEdit) return; const f = S.favs[+b.dataset.go]; setLocation({ ...f }); });
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { S.favs.splice(+b.dataset.del, 1); LS.set('favs', S.favs); updateFavBtn(); renderFavs(); });
+  box.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [S.favs[i - 1], S.favs[i]] = [S.favs[i], S.favs[i - 1]]; LS.set('favs', S.favs); FAVWX.key = ''; renderFavs(); });
+}
+async function openLocSheet() {
+  favEdit = false; renderFavs(); openSheet('#sh-loc');
+  await loadFavWeather(); renderFavs();
+}
+
 async function setLocation(loc) {
   if (!loc.name) {
     loc.name = `${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}`;
@@ -586,6 +747,7 @@ async function setLocation(loc) {
   }
   S.loc = loc; LS.set('loc', loc); closeSheets();
   $('#pname').textContent = loc.name;
+  updateFavBtn();
   placeMarker();
   load(true);
 }
@@ -595,7 +757,8 @@ function openSheet(id) { $('#sheet-bg').style.display = 'block'; requestAnimatio
 function closeSheets() { document.querySelectorAll('.sheet').forEach(s => s.classList.remove('on')); $('#sheet-bg').style.display = 'none'; }
 $('#sheet-bg').onclick = closeSheets;
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
-$('#place').onclick = () => { openSheet('#sh-loc'); setTimeout(() => $('#q').focus(), 300); };
+$('#place').onclick = openLocSheet;
+$('#btn-fav').onclick = toggleFav;
 $('#btn-refresh').onclick = () => { load(true); if (MAP.map) { MAP.cache = {}; loadMapTemps(); } };
 $('#btn-gps').onclick = () => {
   if (!navigator.geolocation) return toast('Geolocalización no disponible');
