@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Cielo</title>
+<meta name="description" content="El tiempo en España comparando AEMET, AROME, Meteocat, ECMWF e ICON">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e0f11" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cielo">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root{
+  --bg:#f6f6f4; --card:#ffffff; --ink:#15171a; --mute:#7b8088; --line:#e7e7e3; --soft:#efefeb;
+  --accent:#15171a; --tab-h:58px;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  --m-aemet:#e0533a; --m-arome:#2f6fe4; --m-meteocat:#e2a50b; --m-ecmwf:#8a63d2; --m-icon:#17a398; --m-cons:#15171a;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0e0f11; --card:#17191c; --ink:#f1f1ee; --mute:#8b9098; --line:#26292d; --soft:#1e2124; --accent:#f1f1ee;
+    --m-aemet:#ff7a5c; --m-arome:#6b9bff; --m-meteocat:#f5c242; --m-ecmwf:#b195f0; --m-icon:#3cc9bb; --m-cons:#f1f1ee; }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:15px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+#app{position:fixed;inset:0;display:flex;flex-direction:column}
+header{padding:calc(var(--safe-t) + 8px) 20px 6px;display:flex;align-items:center;gap:10px;flex:none}
+#place{flex:1;min-width:0;text-align:left}
+#place .n{font-weight:650;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
+#place .n svg{flex:none;opacity:.5}
+#place .s{font-size:12px;color:var(--mute)}
+.icon-btn{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;background:var(--soft)}
+main{flex:1;position:relative;overflow:hidden}
+.view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 20px calc(var(--tab-h) + var(--safe-b) + 24px);display:none}
+.view.on{display:block}
+#v-map{padding:0}
+nav{position:fixed;left:0;right:0;bottom:0;padding:6px 24px calc(var(--safe-b) + 6px);display:flex;justify-content:space-around;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(18px) saturate(1.4);-webkit-backdrop-filter:blur(18px) saturate(1.4);
+  border-top:.5px solid var(--line);z-index:1000}
+nav button{flex:1;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10.5px;color:var(--mute);font-weight:550}
+nav button.on{color:var(--ink)}
+nav svg{width:24px;height:24px}
+
+/* ---------- now ---------- */
+.hero{padding:18px 0 8px;display:flex;align-items:center;gap:16px}
+.hero .t{font-size:92px;font-weight:200;letter-spacing:-4px;line-height:.9}
+.hero .ico{width:64px;height:64px}
+.hero .d{font-size:17px;font-weight:550}
+.hero .sub{color:var(--mute);font-size:13px;margin-top:2px}
+.agree{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mute);margin-top:8px;padding:4px 10px;border-radius:20px;background:var(--soft)}
+.agree i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.sec{margin-top:22px}
+.sec h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);font-weight:600;margin:0 0 8px}
+.card{background:var(--card);border-radius:18px;padding:4px 14px}
+.row{display:grid;grid-template-columns:10px 1fr 28px 46px 64px;align-items:center;gap:10px;padding:11px 0;border-bottom:.5px solid var(--line)}
+.row:last-child{border-bottom:0}
+.dot{width:10px;height:10px;border-radius:50%}
+.row .nm{font-weight:600;font-size:15px}
+.row .ds{font-size:11.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .ic{width:26px;height:26px}
+.row .tp{font-size:20px;font-weight:450;text-align:right}
+.row .xt{font-size:11.5px;color:var(--mute);text-align:right;line-height:1.3}
+.row.off{opacity:.45}
+.row.off .tp{font-size:12px;font-weight:500;grid-column:3/6;text-align:right;color:var(--mute)}
+.strip{display:flex;overflow-x:auto;gap:2px;scrollbar-width:none;padding:10px 4px}
+.strip::-webkit-scrollbar{display:none}
+.strip .h{flex:none;width:52px;text-align:center;font-size:12px;color:var(--mute)}
+.strip .h b{display:block;color:var(--ink);font-size:16px;font-weight:500;margin-top:2px}
+.strip .h svg{width:24px;height:24px;margin:6px auto 0;display:block;color:var(--ink)}
+.strip .h .p{font-size:10.5px;color:var(--m-arome);height:13px}
+.mm{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.mm div{background:var(--card);border-radius:14px;padding:10px 12px}
+.mm span{display:block;font-size:11px;color:var(--mute)}
+.mm b{font-size:17px;font-weight:550}
+
+/* ---------- meteogram ---------- */
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:20px;background:var(--card);font-size:12.5px;font-weight:550}
+.chip i{width:8px;height:8px;border-radius:50%}
+.chip.off{opacity:.38}
+.readout{height:44px;font-size:12px;color:var(--mute);display:flex;flex-wrap:wrap;align-content:center;gap:2px 10px}
+.readout b{color:var(--ink);font-weight:600}
+.mg{position:relative;background:var(--card);border-radius:18px;padding:8px 0 8px 0;display:flex}
+.mg .yax{flex:none;width:34px}
+.mg .sc{flex:1;overflow-x:auto;scrollbar-width:none;touch-action:pan-x pan-y}
+.mg .sc::-webkit-scrollbar{display:none}
+.mg svg text{font-size:10px;fill:var(--mute)}
+.note{font-size:11.5px;color:var(--mute);margin-top:12px;line-height:1.45}
+
+/* ---------- map ---------- */
+#map{position:absolute;inset:0;background:var(--soft)}
+.mapbar{position:absolute;left:12px;right:12px;bottom:calc(var(--tab-h) + var(--safe-b) + 12px);z-index:500;
+  background:color-mix(in srgb,var(--card) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-radius:18px;padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.12)}
+.mapbar .top{display:flex;align-items:center;gap:6px}
+.seg{display:flex;background:var(--soft);border-radius:10px;padding:2px;flex:1}
+.seg button{flex:1;padding:6px 0;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--mute)}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.mapbar input[type=range]{width:100%;margin:10px 0 0;accent-color:var(--ink)}
+.mapbar .tl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute)}
+.mapbar .tl b{color:var(--ink);font-weight:600}
+.tlab{background:var(--card);color:var(--ink);border-radius:10px;padding:2px 6px;font:600 12px -apple-system,system-ui,sans-serif;
+  box-shadow:0 1px 4px rgba(0,0,0,.18);white-space:nowrap;display:inline-flex;align-items:center;gap:2px;transform:translate(-50%,-50%)}
+.tlab svg{width:15px;height:15px}
+.leaflet-container{font:inherit;background:var(--soft)}
+.leaflet-control-attribution{font-size:9px!important;background:color-mix(in srgb,var(--card) 70%,transparent)!important;color:var(--mute)!important}
+.leaflet-control-attribution a{color:var(--mute)!important}
+.leaflet-top{top:8px}
+.me{width:16px;height:16px;border-radius:50%;background:var(--m-arome);border:3px solid #fff;box-shadow:0 0 0 6px color-mix(in srgb,var(--m-arome) 25%,transparent)}
+.radar-btn{height:32px;padding:0 12px;border-radius:10px;background:var(--soft);font-size:12.5px;font-weight:600;color:var(--mute)}
+.radar-btn.on{background:var(--ink);color:var(--bg)}
+
+/* ---------- sheets ---------- */
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:2000;display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:88%;overflow-y:auto;background:var(--bg);border-radius:22px 22px 0 0;
+  padding:10px 20px calc(var(--safe-b) + 20px);z-index:2001;transform:translateY(105%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.sheet.on{transform:none}
+.sheet .grab{width:38px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 12px}
+.sheet h2{font-size:20px;margin:0 0 14px;font-weight:650}
+.field{background:var(--card);border-radius:14px;padding:10px 14px;margin-bottom:10px}
+.field label{display:block;font-size:12px;color:var(--mute);margin-bottom:4px}
+.field input{width:100%;border:0;background:none;outline:none;font-size:15px}
+.field small{display:block;font-size:11.5px;color:var(--mute);margin-top:6px;line-height:1.4}
+.field small a{color:var(--m-arome)}
+.search{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:14px;padding:11px 14px}
+.search input{flex:1;border:0;background:none;outline:none;font-size:16px}
+.res button{display:block;width:100%;text-align:left;padding:12px 2px;border-bottom:.5px solid var(--line)}
+.res button span{color:var(--mute);font-size:13px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;border-radius:14px;background:var(--card);font-weight:600;margin-top:10px}
+.btn.pri{background:var(--ink);color:var(--bg)}
+.tog{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:.5px solid var(--line)}
+.tog:last-child{border-bottom:0}
+.sw{width:46px;height:28px;border-radius:14px;background:var(--line);position:relative;transition:.2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.sw.on{background:#34c759}
+.sw.on::after{left:21px}
+.toast{position:fixed;left:50%;top:calc(var(--safe-t) + 60px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:20px;font-size:13px;z-index:3000;opacity:0;transition:opacity .25s;pointer-events:none;max-width:86%;text-align:center}
+.toast.on{opacity:1}
+.skel{color:var(--mute);text-align:center;padding:60px 0}
+.spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button id="place" aria-label="Cambiar ubicación">
+      <div class="n"><span id="pname">Cargando…</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4.5l3 3 3-3"/></svg></div>
+      <div class="s" id="pstat">&nbsp;</div>
+    </button>
+    <button class="icon-btn" id="btn-refresh" aria-label="Actualizar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg></button>
+    <button class="icon-btn" id="btn-set" aria-label="Ajustes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </header>
+  <main>
+    <section class="view" id="v-map"><div id="map"></div>
+      <div class="mapbar">
+        <div class="top">
+          <div class="seg" id="mapmodel"></div>
+          <button class="radar-btn" id="radar">Radar</button>
+        </div>
+        <input type="range" id="mapt" min="0" max="47" value="0" step="1" aria-label="Hora">
+        <div class="tl"><span id="mapt-l"><b>Ahora</b></span><span id="mapt-r">+48 h</span></div>
+      </div>
+    </section>
+    <section class="view on" id="v-now"><div class="skel"><div class="spin"></div>Consultando modelos…</div></section>
+    <section class="view" id="v-mg"></section>
+  </main>
+  <nav>
+    <button data-v="map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M9 4L3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>Mapa</button>
+    <button data-v="now" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>Ahora</button>
+    <button data-v="mg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l4.5-6 4 3.5L16 7l5 5"/><path d="M3 21h18"/></svg>Meteograma</button>
+  </nav>
+</div>
+
+<div class="sheet-bg" id="sheet-bg"></div>
+<div class="sheet" id="sh-loc">
+  <div class="grab"></div>
+  <h2>Ubicación</h2>
+  <div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="q" type="search" placeholder="Buscar municipio" autocomplete="off" enterkeyhint="search"></div>
+  <button class="btn" id="btn-gps"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3L3 10.5l7.5 2.9L13.4 21z"/></svg>Usar mi ubicación</button>
+  <div class="res" id="res"></div>
+</div>
+<div class="sheet" id="sh-set">
+  <div class="grab"></div>
+  <h2>Ajustes</h2>
+  <div class="field"><label>API key de AEMET OpenData</label><input id="k-aemet" type="password" autocomplete="off" placeholder="eyJhbGciOi…">
+    <small>Gratuita en <a href="https://opendata.aemet.es/centrodedescargas/altaUsuario" target="_blank" rel="noopener">opendata.aemet.es</a>. Predicción municipal horaria.</small></div>
+  <div class="field"><label>API key de Meteocat</label><input id="k-meteocat" type="password" autocomplete="off" placeholder="Solo Catalunya">
+    <small>Se solicita en <a href="https://apidocs.meteocat.gencat.cat/" target="_blank" rel="noopener">apidocs.meteocat.gencat.cat</a>.</small></div>
+  <div class="field"><label>URL del proxy (opcional)</label><input id="k-proxy" type="url" autocomplete="off" placeholder="https://cielo-proxy.tuusuario.workers.dev">
+    <small>Si AEMET o Meteocat bloquean la petición desde el navegador (CORS), despliega <b>proxy/worker.js</b> y pon aquí su URL. Con proxy, las claves se guardan en el servidor y puedes dejar las de arriba vacías.</small></div>
+  <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
+  <div class="card" id="mtog"></div>
+  <button class="btn pri" id="btn-save">Guardar</button>
+  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), Servei Meteorològic de Catalunya, ECMWF, DWD (ICON). Radar: RainViewer. Mapa: © OpenStreetMap, © CARTO.</p>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="app.js"></script>
+</body>
+</html>
