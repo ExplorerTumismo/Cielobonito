@@ -389,12 +389,18 @@ function renderNow() {
   const cat = catAt(now), night = !dayAt(now);
   const feel = consensusAt(now, 'feel'), wind = consensusAt(now, 'wind'), hum = consensusAt(now, 'hum');
 
-  let html = `<div class="hero">
+  // máx/mín de hoy (mediana entre modelos)
+  const dk = (t) => fmt(t, { year: 'numeric', month: '2-digit', day: '2-digit' }), today = dk(Date.now());
+  const hiLo = ms.map(m => { const s = S.data[m]; const v = s.t.map((t, i) => dk(t) === today ? s.temp[i] : null).filter(x => x != null); return v.length >= 12 ? [Math.max(...v), Math.min(...v)] : null; }).filter(Boolean);
+  const hi = median(hiLo.map(x => x[0])), lo = median(hiLo.map(x => x[1]));
+  let html = `<div class="hero-wrap"><div class="hero">
     <div class="t num">${fmtT(ct)}</div>
     <div><div class="ico">${icon(cat, night)}</div></div></div>
   <div class="d">${CAT_TXT[cat] || '—'}</div>
+  ${hi != null ? `<div class="hl num">Máx. ${fmtT(hi)} · Mín. ${fmtT(lo)}</div>` : ''}
   <div class="sub num">Sensación ${fmtT(feel)} · Viento ${wind == null ? '–' : Math.round(wind)} km/h · Humedad ${hum == null ? '–' : Math.round(hum)}%</div>
-  <div class="agree"><i style="background:${ag[1]}"></i>Coincidencia ${ag[0].toLowerCase()} · ${temps.length} modelos · ±${round(spread / 2, 1).toString().replace('.', ',')}°</div>`;
+  <div><div class="agree"><i style="background:${ag[1]}"></i>Coincidencia ${ag[0].toLowerCase()} · ${temps.length} modelos · ±${round(spread / 2, 1).toString().replace('.', ',')}°</div></div>
+  <svg class="scroll-hint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>`;
 
   // próximas 24 h (consenso)
   html += `<div class="sec"><h3>Próximas horas · consenso</h3><div class="card strip">`;
@@ -443,6 +449,14 @@ function renderNow() {
   }
   html += `<p class="note">Temperatura principal: mediana de los modelos disponibles. La coincidencia mide la dispersión de temperatura entre ellos ahora mismo.</p>`;
   v.innerHTML = html;
+  // fondo de paisaje acorde al tiempo y la hora
+  const todayNoon = zoned(fmt(Date.now(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'), 12, S.tz);
+  const sn = sunTimes(todayNoon, S.loc.lat, S.loc.lon);
+  Scene.set(cat || 'partly', Date.now(), sn.rise, sn.set).then(syncTheme);
+}
+function syncTheme() {
+  const scenic = document.body.classList.contains('scenic');
+  document.querySelectorAll('meta[name=theme-color]').forEach(m => m.setAttribute('content', scenic ? Scene.topColor() : (m.media.includes('dark') ? '#0e0f11' : '#f6f6f4')));
 }
 
 function renderExtras(now) {
@@ -561,7 +575,7 @@ function renderMG() {
     if (!dayAt(t)) g += `<rect x="${X(t)}" y="${y0}" width="${PX + .5}" height="${HT - y0}" fill="var(--soft)" opacity=".7"/>`;
     const h = localHour(t);
     if (h === 0) g += `<line x1="${X(t)}" x2="${X(t)}" y1="0" y2="${HT}" stroke="var(--line)"/>`;
-    if (h === 0 || k === 0) g += `<text x="${X(t) + 4}" y="12" style="font-weight:600;fill:var(--ink)">${fmt(t, { weekday: 'short', day: 'numeric' })}</text>`;
+    if (h === 0 || (k === 0 && h < 20)) g += `<text x="${X(t) + 4}" y="12" style="font-weight:600;fill:var(--ink)">${fmt(t, { weekday: 'short', day: 'numeric' })}</text>`;
     if (h % 6 === 0 && h) g += `<text x="${X(t)}" y="${y0 + H1 + 14}" text-anchor="middle">${h}h</text>`;
   }
   // rejilla temperatura
@@ -736,6 +750,9 @@ async function toggleRadar() {
 // ───────────────────────── navegación / UI ─────────────────────────
 function show(view) {
   S.view = view; LS.set('view', view);
+  document.body.classList.toggle('scenic', view === 'now');
+  if (view === 'now') Scene.start(); else Scene.stop();
+  syncTheme();
   document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.id === 'v-' + view));
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
   if (view === 'map') { initMap(); setTimeout(() => MAP.map && MAP.map.invalidateSize(), 50); }
@@ -842,6 +859,7 @@ $('#btn-set').onclick = () => {
   $('#k-aemet').value = S.keys.aemet; $('#k-carto').value = S.keys.carto || ''; $('#k-meteocat').value = S.keys.meteocat; $('#k-proxy').value = S.keys.proxy;
   $('#mtog').innerHTML = ORDER.map(m => `<div class="tog"><span><i class="dot" style="display:inline-block;margin-right:8px;background:${mcolor(m)}"></i>${MODELS[m].name} <span style="color:var(--mute);font-size:12px">${MODELS[m].sub}</span></span><button class="sw ${S.enabled[m] ? 'on' : ''}" data-m="${m}" aria-label="${MODELS[m].name}"></button></div>`).join('');
   $('#mtog').querySelectorAll('.sw').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  renderPhotos();
   openSheet('#sh-set');
 };
 $('#btn-save').onclick = () => {
@@ -852,6 +870,28 @@ $('#btn-save').onclick = () => {
   if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && !MAP.frames.some(f => f.layer === l)) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
   closeSheets(); load(true);
 };
+// fondos propios por condición
+let photoSlot = null;
+async function renderPhotos() {
+  const have = await Scene.listPhotos();
+  const thumbs = {};
+  $('#photos').innerHTML = Scene.SLOTS.map(([k, n]) => `<div class="prow"><div class="thumb" data-k="${k}"></div><span class="pn">${n}</span>
+    ${have.has(k) ? `<button class="rm" data-rm="${k}">Quitar</button>` : ''}<button data-pick="${k}">${have.has(k) ? 'Cambiar' : 'Elegir foto'}</button></div>`).join('');
+  $('#photos').querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { photoSlot = b.dataset.pick; $('#photo-in').value = ''; $('#photo-in').click(); });
+  $('#photos').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { await Scene.delPhoto(b.dataset.rm); renderPhotos(); renderNow(); });
+  // miniaturas
+  for (const k of have) {
+    const blob = await new Promise(r => { const q = indexedDB.open('cielo', 1); q.onsuccess = () => { const g = q.result.transaction('photos').objectStore('photos').get(k); g.onsuccess = () => r(g.result); g.onerror = () => r(null); }; q.onerror = () => r(null); });
+    const el = $(`#photos .thumb[data-k="${k}"]`); if (blob && el) el.style.backgroundImage = `url(${URL.createObjectURL(blob)})`;
+  }
+}
+$('#photo-in').onchange = async (e) => {
+  const f = e.target.files?.[0]; if (!f || !photoSlot) return;
+  try { await Scene.setPhoto(photoSlot, await Scene.shrink(f)); toast('Foto guardada'); }
+  catch { toast('No se pudo guardar la foto'); }
+  renderPhotos(); renderNow();
+};
+
 // gesto: deslizar la hoja hacia abajo para cerrar
 document.querySelectorAll('.sheet').forEach(sh => {
   let y0 = null;

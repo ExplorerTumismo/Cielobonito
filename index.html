@@ -192,12 +192,40 @@ nav svg{width:24px;height:24px}
 .cells{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:12px}
 .cells i{height:16px;border-radius:3px}
 .cellax{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mute);margin-top:4px}
+
+/* ---------- modo paisaje (pestaña Ahora) ---------- */
+#photo,#scene{position:fixed;inset:0;width:100%;height:100%;display:none;z-index:0}
+#photo{background:#000 center/cover no-repeat}
+#photo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,0) 30%,rgba(0,0,0,.08) 60%,rgba(0,0,0,.45))}
+body.scenic:not(.has-photo) #scene{display:block}
+body.scenic.has-photo #photo{display:block}
+body.scenic{background:#000}
+#app{z-index:1}
+body.scenic header,body.scenic nav,body.scenic #v-now{
+  --ink:#fff;--mute:rgba(255,255,255,.74);--line:rgba(255,255,255,.2);--soft:rgba(255,255,255,.14);--card:rgba(14,20,32,.32);
+  --m-aemet:#ff8f74;--m-arome:#8fb4ff;--m-meteocat:#ffd25e;--m-ecmwf:#c6adff;--m-icon:#5fe0d2;color:#fff}
+body.scenic nav{background:rgba(10,14,22,.28);border-top-color:rgba(255,255,255,.12)}
+body.scenic .icon-btn{background:rgba(255,255,255,.16);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+body.scenic #v-now .card,body.scenic #v-now .tile,body.scenic #v-now .mm div{
+  backdrop-filter:blur(22px) saturate(1.25);-webkit-backdrop-filter:blur(22px) saturate(1.25);border:.5px solid rgba(255,255,255,.12)}
+body.scenic header,body.scenic .hero-wrap{text-shadow:0 1px 14px rgba(0,0,0,.28)}
+body.scenic #v-now .sec h3,body.scenic #v-now .note{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.35),0 0 14px rgba(0,0,0,.35)}
+.hero-wrap{min-height:calc(100dvh - var(--safe-t) - var(--safe-b) - 190px);display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:6px}
+.hero-wrap .hl{font-size:15px;font-weight:550;margin-top:2px;opacity:.95}
+.hero-wrap .scroll-hint{margin:18px auto 0;opacity:.6;width:22px;height:22px}
+.prow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .pn{flex:1;font-size:14.5px}
+.prow .thumb{width:38px;height:38px;border-radius:9px;background:var(--soft) center/cover;flex:none}
+.prow button{font-size:13.5px;font-weight:600;color:var(--m-arome)}
+.prow button.rm{color:#ff453a}
 .skel{color:var(--mute);text-align:center;padding:60px 0}
 .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
 @keyframes sp{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
+<div id="photo"></div><canvas id="scene" aria-hidden="true"></canvas>
 <div id="app">
   <header>
     <button id="place" aria-label="Cambiar ubicación">
@@ -251,6 +279,10 @@ nav svg{width:24px;height:24px}
     <small>Gratuita en <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">carto.com/basemaps/apikey</a>. Solo cambia el estilo del fondo del mapa.</small></div>
   <div class="field"><label>URL del proxy (opcional)</label><input id="k-proxy" type="url" autocomplete="off" placeholder="https://cielo-proxy.tuusuario.workers.dev">
     <small>Si AEMET o Meteocat bloquean la petición desde el navegador (CORS), despliega <b>proxy/worker.js</b> y pon aquí su URL. Con proxy, las claves se guardan en el servidor y puedes dejar las de arriba vacías.</small></div>
+  <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Fondos de «Ahora»</h3>
+  <p class="note" style="margin:0 0 8px">Sin foto, se dibuja un paisaje animado según el tiempo y la hora. Puedes poner tus propias fotos para cada situación.</p>
+  <div class="card" id="photos"></div>
+  <input type="file" id="photo-in" accept="image/*" hidden>
   <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
   <div class="card" id="mtog"></div>
   <button class="btn pri" id="btn-save">Guardar</button>
@@ -259,6 +291,7 @@ nav svg{width:24px;height:24px}
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="scene.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

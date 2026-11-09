@@ -8,6 +8,9 @@ Compara varios modelos y predicciones para cualquier punto de España, Baleares,
 - **Ahora** — temperatura de consenso (mediana), indicador de coincidencia entre modelos, próximas 24 h y el valor de cada modelo ahora mismo; rango de máx/mín de hoy.
 - **Meteograma** — hasta 7 días: temperatura (una línea por modelo + banda de dispersión), precipitación (mediana y máximo) y viento con rachas. Desliza el dedo para leer los valores hora a hora; toca las etiquetas para ocultar modelos.
 
+## Aspecto
+La pestaña **Ahora** muestra un paisaje a pantalla completa que cambia con el tiempo (despejado, nubes, lluvia, tormenta con relámpagos, nieve, niebla) y con la hora (día, amanecer, atardecer, noche con luna y estrellas). Los datos van en tarjetas de cristal oscuro encima. En **Ajustes → Fondos** puedes poner tus propias fotos para cada situación; se guardan solo en el teléfono.
+
 ## Fuentes
 | Modelo | Origen | Clave | Alcance |
 |---|---|---|---|
