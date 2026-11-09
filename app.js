@@ -448,20 +448,38 @@ function renderNow() {
 function renderExtras(now) {
   const { lat, lon } = S.loc;
   const todayNoon = zoned(fmt(Date.now(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'), 12, S.tz);
-  const sun = sunTimes(todayNoon, lat, lon), tom = sunTimes(todayNoon + 864e5, lat, lon);
-  const len = sun.set - sun.rise, lenStr = `${Math.floor(len / HOUR)} h ${Math.round(len % HOUR / 60e3)} min`;
-  const diff = Math.round(((tom.set - tom.rise) - len) / 60e3);
-  // arco solar
-  const f = Math.max(0, Math.min(1, (Date.now() - sun.rise) / len)), up = Date.now() > sun.rise && Date.now() < sun.set;
-  const ax = 8 + f * 124, ay = 52 - Math.sin(f * Math.PI) * 40;
-  const arc = `<svg viewBox="0 0 140 58" class="arc"><path d="M8 52 Q70 -28 132 52" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="3 3"/>
-    <line x1="2" x2="138" y1="52" y2="52" stroke="var(--line)"/>${up ? `<circle cx="${ax}" cy="${ay}" r="6" fill="#f5b83d"/>` : ''}</svg>`;
-  const t2 = (ms) => fmt(ms, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const sun = sunTimes(todayNoon, lat, lon), tom = sunTimes(todayNoon + 864e5, lat, lon), yest = sunTimes(todayNoon - 864e5, lat, lon);
+  const nowMs = Date.now(), t2 = (ms) => fmt(ms, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const dur = (ms) => { const m = Math.round(ms / 60e3); return `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const dmin = (a, b) => { const d = Math.round(((b.set - b.rise) - (a.set - a.rise)) / 60e3); return d === 0 ? 'la misma luz' : `${Math.abs(d)} min ${d > 0 ? 'más' : 'menos'}`; };
+  const isDay = nowMs >= sun.rise && nowMs < sun.set;
+  // de noche: tramo entre la última puesta y la próxima salida
+  const nSet = nowMs >= sun.set ? sun.set : yest.set, nRise = nowMs >= sun.set ? tom.rise : sun.rise;
+  const HZ = 40; // horizonte
+  let mark = '', left, right, foot;
+  if (isDay) {
+    const f = (nowMs - sun.rise) / (sun.set - sun.rise);
+    const x = 8 + f * 124, y = HZ - Math.sin(f * Math.PI) * 32;
+    mark = `<circle cx="${x}" cy="${y}" r="6" fill="#f5b83d"/>`;
+    left = ['Salida', t2(sun.rise)]; right = ['Puesta', t2(sun.set)];
+    foot = `${dur(sun.set - sun.rise)} de luz hoy<br>Mañana, ${dmin(sun, tom)}`;
+  } else {
+    const f = (nowMs - nSet) / (nRise - nSet);
+    const x = 8 + f * 124, y = HZ + Math.sin(f * Math.PI) * 20;
+    mark = `<path transform="translate(${x - 6} ${y - 6})" d="M8.5 0.8a6 6 0 1 0 3.2 9.6 4.6 4.6 0 0 1-3.2-9.6z" fill="var(--ink)" opacity=".85"/>`;
+    left = ['Puesta', t2(nSet)]; right = [nRise > todayNoon + 12 * HOUR ? 'Salida mañana' : 'Salida', t2(nRise)];
+    const nextDay = nowMs >= sun.set ? tom : sun, prevDay = nowMs >= sun.set ? sun : yest;
+    foot = `Amanece en ${dur(nRise - nowMs)}<br>${nowMs >= sun.set ? 'Mañana' : 'Hoy'}: ${dur(nextDay.set - nextDay.rise)} de luz (${dmin(prevDay, nextDay)})`;
+  }
+  const arc = `<svg viewBox="0 0 140 64" class="arc">
+    <path d="M8 ${HZ} Q70 ${HZ - 64} 132 ${HZ}" fill="none" stroke="${isDay ? '#f5b83d' : 'var(--line)'}" stroke-width="1.5" stroke-dasharray="3 3" opacity="${isDay ? .7 : 1}"/>
+    <path d="M8 ${HZ} Q70 ${HZ + 40} 132 ${HZ}" fill="none" stroke="${isDay ? 'var(--line)' : 'var(--mute)'}" stroke-width="1.5" stroke-dasharray="3 3" opacity="${isDay ? 1 : .6}"/>
+    <line x1="2" x2="138" y1="${HZ}" y2="${HZ}" stroke="var(--mute)" stroke-width=".8" opacity=".6"/>${mark}</svg>`;
 
   let html = `<div class="sec"><h3>Sol y aire</h3><div class="duo">
     <div class="tile">${arc}
-      <div class="sunrow num"><div><span>Salida</span><b>${t2(sun.rise)}</b></div><div style="text-align:right"><span>Puesta</span><b>${t2(sun.set)}</b></div></div>
-      <div class="foot num">${lenStr} de luz · ${diff >= 0 ? '+' : '−'}${Math.abs(diff)} min mañana</div></div>`;
+      <div class="sunrow num"><div><span>${left[0]}</span><b>${left[1]}</b></div><div style="text-align:right"><span>${right[0]}</span><b>${right[1]}</b></div></div>
+      <div class="foot num">${foot}</div></div>`;
 
   const a = S.air?.cur;
   if (a && a.european_aqi != null) {
