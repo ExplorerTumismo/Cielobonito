@@ -242,12 +242,14 @@ nav svg{width:24px;height:24px}
     <small>Gratuita en <a href="https://opendata.aemet.es/centrodedescargas/altaUsuario" target="_blank" rel="noopener">opendata.aemet.es</a>. Predicción municipal horaria.</small></div>
   <div class="field"><label>API key de Meteocat</label><input id="k-meteocat" type="password" autocomplete="off" placeholder="Solo Catalunya">
     <small>Se solicita en <a href="https://apidocs.meteocat.gencat.cat/" target="_blank" rel="noopener">apidocs.meteocat.gencat.cat</a>.</small></div>
+  <div class="field"><label>API key de CARTO para el mapa (opcional)</label><input id="k-carto" type="password" autocomplete="off" placeholder="Sin clave se usa el mapa de Esri">
+    <small>Gratuita en <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">carto.com/basemaps/apikey</a>. Solo cambia el estilo del fondo del mapa.</small></div>
   <div class="field"><label>URL del proxy (opcional)</label><input id="k-proxy" type="url" autocomplete="off" placeholder="https://cielo-proxy.tuusuario.workers.dev">
     <small>Si AEMET o Meteocat bloquean la petición desde el navegador (CORS), despliega <b>proxy/worker.js</b> y pon aquí su URL. Con proxy, las claves se guardan en el servidor y puedes dejar las de arriba vacías.</small></div>
   <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
   <div class="card" id="mtog"></div>
   <button class="btn pri" id="btn-save">Guardar</button>
-  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), Servei Meteorològic de Catalunya, ECMWF, DWD (ICON). Calidad del aire: Copernicus CAMS vía Open-Meteo. Radar: RainViewer. Mapa: © OpenStreetMap, © CARTO.</p>
+  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), Servei Meteorològic de Catalunya, ECMWF, DWD (ICON). Calidad del aire: Copernicus CAMS vía Open-Meteo. Radar: RainViewer. Mapa: Esri / © OpenStreetMap (o CARTO con clave).</p>
 </div>
 <div class="toast" id="toast"></div>
 

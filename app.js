@@ -615,15 +615,24 @@ function initMap() {
   if (!window.L) { toast('El mapa necesita conexión la primera vez'); return; }
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   MAP.map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 12 }).setView([40.2, -3.6], 5);
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark' : 'light'}_all/{z}/{x}/{y}{r}.png`, {
-    attribution: '© OpenStreetMap · © CARTO', subdomains: 'abcd', maxZoom: 19,
-  }).addTo(MAP.map);
+  baseLayers(dark).forEach(l => l.addTo(MAP.map));
   MAP.labels = L.layerGroup().addTo(MAP.map);
   MAP.map.on('click', (e) => setLocation({ lat: e.latlng.lat, lon: e.latlng.lng, name: null }));
   placeMarker();
   $('#mapt').oninput = drawMapTemps;
   $('#radar').onclick = toggleRadar;
   loadMapTemps();
+}
+// Cartografía base: CARTO si hay clave (gratuita, carto.com/basemaps/apikey); si no, Esri Canvas, que no necesita clave
+function baseLayers(dark) {
+  const key = (S.keys.carto || '').trim();
+  if (key) return [L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/${dark ? 'dark' : 'light'}_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`,
+    { attribution: '© OpenStreetMap · © CARTO', maxZoom: 19 })];
+  const g = dark ? 'Dark' : 'Light', base = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_' + g + '_Gray_';
+  return [
+    L.tileLayer(base + 'Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri, HERE, Garmin, © OpenStreetMap', maxNativeZoom: 16, maxZoom: 19 }),
+    L.tileLayer(base + 'Reference/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 16, maxZoom: 19, opacity: dark ? 0.75 : 0.9 }),
+  ];
 }
 function placeMarker() {
   if (!MAP.map) return;
@@ -778,15 +787,17 @@ $('#q').oninput = (e) => {
   }, 280);
 };
 $('#btn-set').onclick = () => {
-  $('#k-aemet').value = S.keys.aemet; $('#k-meteocat').value = S.keys.meteocat; $('#k-proxy').value = S.keys.proxy;
+  $('#k-aemet').value = S.keys.aemet; $('#k-carto').value = S.keys.carto || ''; $('#k-meteocat').value = S.keys.meteocat; $('#k-proxy').value = S.keys.proxy;
   $('#mtog').innerHTML = ORDER.map(m => `<div class="tog"><span><i class="dot" style="display:inline-block;margin-right:8px;background:${mcolor(m)}"></i>${MODELS[m].name} <span style="color:var(--mute);font-size:12px">${MODELS[m].sub}</span></span><button class="sw ${S.enabled[m] ? 'on' : ''}" data-m="${m}" aria-label="${MODELS[m].name}"></button></div>`).join('');
   $('#mtog').querySelectorAll('.sw').forEach(b => b.onclick = () => b.classList.toggle('on'));
   openSheet('#sh-set');
 };
 $('#btn-save').onclick = () => {
-  S.keys = { aemet: $('#k-aemet').value.trim(), meteocat: $('#k-meteocat').value.trim(), proxy: $('#k-proxy').value.trim() };
+  S.keys = { aemet: $('#k-aemet').value.trim(), meteocat: $('#k-meteocat').value.trim(), proxy: $('#k-proxy').value.trim(), carto: $('#k-carto').value.trim() };
   $('#mtog').querySelectorAll('.sw').forEach(b => S.enabled[b.dataset.m] = b.classList.contains('on'));
+  const mapChanged = (LS.get('keys', {}).carto || '') !== S.keys.carto;
   LS.set('keys', S.keys); LS.set('enabled', S.enabled);
+  if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && l !== MAP.radar) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
   closeSheets(); load(true);
 };
 // gesto: deslizar la hoja hacia abajo para cerrar
