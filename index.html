@@ -108,7 +108,11 @@ nav svg{width:24px;height:24px}
 .seg{display:flex;background:var(--soft);border-radius:10px;padding:2px;flex:1}
 .seg button{flex:1;padding:6px 0;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--mute)}
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.mapbar input[type=range]{width:100%;margin:10px 0 0;accent-color:var(--ink)}
+.mapbar input[type=range]{flex:1;width:100%;margin:0;accent-color:var(--ink)}
+.slrow{display:flex;align-items:center;gap:10px;margin-top:10px}
+#play{display:none;width:30px;height:30px;border-radius:15px;background:var(--ink);color:var(--bg);place-items:center;flex:none}
+.mapbar.radar #play{display:grid}
+.mapbar.radar .seg{opacity:.35;pointer-events:none}
 .mapbar .tl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute)}
 .mapbar .tl b{color:var(--ink);font-weight:600}
 .tlab{background:var(--card);color:var(--ink);border-radius:10px;padding:2px 6px;font:600 12px -apple-system,system-ui,sans-serif;
@@ -211,7 +215,8 @@ nav svg{width:24px;height:24px}
           <div class="seg" id="mapmodel"></div>
           <button class="radar-btn" id="radar">Radar</button>
         </div>
-        <input type="range" id="mapt" min="0" max="47" value="0" step="1" aria-label="Hora">
+        <div class="slrow"><button id="play" aria-label="Reproducir radar"></button>
+        <input type="range" id="mapt" min="0" max="47" value="0" step="1" aria-label="Hora"></div>
         <div class="tl"><span id="mapt-l"><b>Ahora</b></span><span id="mapt-r">+48 h</span></div>
       </div>
     </section>

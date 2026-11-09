@@ -151,17 +151,18 @@ const proxy = () => (S.keys.proxy || '').replace(/\/+$/, '');
 
 // Open-Meteo: AROME, ECMWF, ICON en una sola llamada
 async function fetchOpenMeteo(lat, lon) {
+  // Una petición por modelo: si AROME no cubre el punto (sur de Andalucía, Ceuta, Melilla, Canarias),
+  // Open-Meteo responde 400 y eso no debe tumbar ECMWF ni ICON.
   const want = Object.keys(OM_MODELS).filter(m => S.enabled[m]);
-  if (!want.length) return {};
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${OM_VARS}`
-    + `&models=${want.map(m => OM_MODELS[m]).join(',')}&timezone=auto&timeformat=unixtime&forecast_days=7&wind_speed_unit=kmh`;
-  const j = await getJSON(url);
-  if (j.timezone) S.tz = j.timezone;
-  const h = j.hourly, out = {};
-  for (const m of want) {
-    const sfx = want.length > 1 ? '_' + OM_MODELS[m] : '';
-    const g = (v) => h[v + sfx] || [];
-    const map = new Map();
+  const out = {};
+  await Promise.all(want.map(async (m) => {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${OM_VARS}`
+      + `&models=${OM_MODELS[m]}&timezone=auto&timeformat=unixtime&forecast_days=7&wind_speed_unit=kmh`;
+    let j;
+    try { j = await getJSON(url); }
+    catch (e) { S.status[m] = /HTTP 400/.test(e.message) ? (m === 'arome' ? 'AROME no cubre esta zona' : 'Sin datos aquí') : 'Error de red'; return; }
+    if (j.timezone) S.tz = j.timezone;
+    const h = j.hourly, g = (v) => h[v] || [], map = new Map();
     h.time.forEach((ts, i) => {
       const temp = g('temperature_2m')[i];
       if (temp == null) return;
@@ -172,8 +173,8 @@ async function fetchOpenMeteo(lat, lon) {
       });
     });
     if (map.size) out[m] = fromMap(map);
-    else S.status[m] = m === 'arome' ? 'Fuera del dominio AROME' : 'Sin datos';
-  }
+    else S.status[m] = m === 'arome' ? 'AROME no cubre esta zona' : 'Sin datos';
+  }));
   return out;
 }
 
@@ -339,7 +340,7 @@ async function load(force = false) {
   $('#pstat').textContent = 'Actualizando…';
   S.status = {};
   const jobs = [
-    fetchOpenMeteo(lat, lon).then(r => r, e => { ['arome', 'ecmwf', 'icon'].forEach(m => S.status[m] = 'Error de red'); return {}; }),
+    fetchOpenMeteo(lat, lon),
     S.enabled.aemet ? fetchAEMET(lat, lon).then(r => ({ aemet: r }), e => { S.status.aemet = e.message === 'nokey' ? 'Añade la API key en Ajustes' : e.message === 'lejos' ? 'Sin municipio cercano' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
     S.enabled.meteocat ? fetchMeteocat(lat, lon).then(r => ({ meteocat: r }), e => { S.status.meteocat = e.message === 'fuera' ? 'Solo Catalunya' : e.message === 'nokey' ? 'Añade la API key en Ajustes' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
   ];
@@ -603,7 +604,7 @@ function renderMG() {
 }
 
 // ───────────────────────── render: Mapa ─────────────────────────
-const MAP = { map: null, marker: null, labels: null, radar: null, radarOn: false, model: LS.get('mapModel', 'arome'), cache: {} };
+const MAP = { map: null, marker: null, labels: null, radar: null, radarOn: false, frames: [], play: null, model: LS.get('mapModel', 'arome'), cache: {} };
 const MAP_MODELS = { arome: 'AROME', ecmwf: 'ECMWF', icon: 'ICON' };
 function initMap() {
   const seg = $('#mapmodel');
@@ -619,7 +620,8 @@ function initMap() {
   MAP.labels = L.layerGroup().addTo(MAP.map);
   MAP.map.on('click', (e) => setLocation({ lat: e.latlng.lat, lon: e.latlng.lng, name: null }));
   placeMarker();
-  $('#mapt').oninput = drawMapTemps;
+  $('#mapt').oninput = () => { if (MAP.radarOn) { stopPlay(); showFrame(+$('#mapt').value); } else drawMapTemps(); };
+  $('#play').onclick = togglePlay; $('#play').innerHTML = PLAY_ICON;
   $('#radar').onclick = toggleRadar;
   loadMapTemps();
 }
@@ -640,45 +642,77 @@ function placeMarker() {
   if (!MAP.marker) MAP.marker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), zIndexOffset: 1000 }).addTo(MAP.map);
   else MAP.marker.setLatLng(ll);
 }
+// Dominio de AROME en Open-Meteo: no llega al sur de ~37,85° N (Sevilla, Málaga, Granada, Almería, Cádiz,
+// Huelva, Jaén, Ceuta, Melilla) ni a Canarias. Si se incluye un punto fuera, la petición entera falla.
+const inArome = (c) => c[1] >= 37.85;
 async function loadMapTemps() {
   const m = MAP.model;
   const fresh = MAP.cache[m] && Date.now() - MAP.cache[m].at < 30 * 60e3;
   if (!fresh) {
+    const idx = CITIES.map((c, i) => i).filter(i => m !== 'arome' || inArome(CITIES[i]));
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${CITIES.map(c => c[1]).join(',')}&longitude=${CITIES.map(c => c[2]).join(',')}`
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${idx.map(i => CITIES[i][1]).join(',')}&longitude=${idx.map(i => CITIES[i][2]).join(',')}`
         + `&hourly=temperature_2m,weather_code,is_day&models=${OM_MODELS[m]}&forecast_hours=48&timeformat=unixtime&timezone=auto`;
       const j = await getJSON(url);
-      MAP.cache[m] = { at: Date.now(), list: Array.isArray(j) ? j : [j] };
+      MAP.cache[m] = { at: Date.now(), idx, list: Array.isArray(j) ? j : [j] };
     } catch { toast('No se pudo cargar el mapa de temperaturas'); return; }
   }
   drawMapTemps();
 }
 function drawMapTemps() {
+  if (MAP.radarOn) return;
   const c = MAP.cache[MAP.model]; if (!c || !MAP.labels) return;
   const k = +$('#mapt').value;
   const t0 = floorHour(Date.now()) + k * HOUR;
   MAP.labels.clearLayers();
   c.list.forEach((r, n) => {
     if (!r.hourly) return;
+    const city = CITIES[c.idx[n]];
     const i = r.hourly.time.findIndex(ts => ts * 1000 >= t0);
     const v = i < 0 ? null : r.hourly.temperature_2m[i];
     if (v == null) return;
     const html = `<div class="tlab num">${icon(catWMO(r.hourly.weather_code[i]), r.hourly.is_day?.[i] === 0)}${Math.round(v)}°</div>`;
-    L.marker([CITIES[n][1], CITIES[n][2]], { icon: L.divIcon({ className: '', html, iconSize: [0, 0] }), interactive: false }).addTo(MAP.labels);
+    L.marker([city[1], city[2]], { icon: L.divIcon({ className: '', html, iconSize: [0, 0] }), interactive: false }).addTo(MAP.labels);
   });
   $('#mapt-l').innerHTML = k === 0 ? '<b>Ahora</b>' : `<b>${fmt(t0, { weekday: 'short' })} ${hh(t0)}</b> · +${k} h`;
-  $('#mapt-r').textContent = MAP_MODELS[MAP.model] + (MAP.model === 'arome' ? ' (sin Canarias)' : '');
+  $('#mapt-r').textContent = MAP.model === 'arome' ? 'AROME: sin sur ni Canarias' : '+48 h';
+}
+
+// Radar (RainViewer): solo ofrece las últimas 2 horas, en imágenes cada 10 minutos; no hay predicción.
+function setSlider(min, max, val) { const r = $('#mapt'); r.min = min; r.max = max; r.value = val; }
+function showFrame(k) {
+  MAP.frames.forEach((f, i) => f.layer.setOpacity(i === k ? 0.75 : 0));
+  const f = MAP.frames[k]; if (!f) return;
+  const ago = Math.round((Date.now() - f.time) / 60e3);
+  $('#mapt-l').innerHTML = `<b>${fmt(f.time, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</b>${k === MAP.frames.length - 1 ? ' · último' : ` · hace ${ago} min`}`;
+  $('#mapt-r').textContent = 'Radar · últimas 2 h';
+}
+function stopPlay() { clearInterval(MAP.play); MAP.play = null; $('#play').innerHTML = PLAY_ICON; }
+const PLAY_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.8v10.4L12 7z"/></svg>';
+const PAUSE_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="2.5" y="2" width="3" height="10" rx="1"/><rect x="8.5" y="2" width="3" height="10" rx="1"/></svg>';
+function togglePlay() {
+  if (MAP.play) return stopPlay();
+  $('#play').innerHTML = PAUSE_ICON;
+  MAP.play = setInterval(() => { const r = $('#mapt'); const v = (+r.value + 1) % MAP.frames.length; r.value = v; showFrame(v); }, 700);
 }
 async function toggleRadar() {
   MAP.radarOn = !MAP.radarOn; $('#radar').classList.toggle('on', MAP.radarOn);
-  if (MAP.radar) { MAP.map.removeLayer(MAP.radar); MAP.radar = null; }
-  if (!MAP.radarOn) return;
+  $('.mapbar').classList.toggle('radar', MAP.radarOn);
+  stopPlay();
+  (MAP.frames || []).forEach(f => MAP.map.removeLayer(f.layer)); MAP.frames = [];
+  if (!MAP.radarOn) {
+    MAP.labels.addTo(MAP.map); setSlider(0, 47, 0); drawMapTemps(); return;
+  }
+  MAP.map.removeLayer(MAP.labels);
   try {
     const j = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
-    const last = j.radar.past.at(-1);
-    MAP.radar = L.tileLayer(`${j.host}${last.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: .7, maxNativeZoom: 7, maxZoom: 12, attribution: 'Radar © RainViewer' }).addTo(MAP.map);
-    toast('Radar: ' + hh(last.time * 1000));
-  } catch { toast('Radar no disponible'); MAP.radarOn = false; $('#radar').classList.remove('on'); }
+    const past = [...(j.radar?.past || []), ...(j.radar?.nowcast || [])];
+    if (!past.length) throw new Error('vacío');
+    MAP.frames = past.map(f => ({ time: f.time * 1000,
+      layer: L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxNativeZoom: 7, maxZoom: 12, attribution: 'Radar © RainViewer' }).addTo(MAP.map) }));
+    setSlider(0, MAP.frames.length - 1, MAP.frames.length - 1);
+    showFrame(MAP.frames.length - 1);
+  } catch { toast('Radar no disponible'); MAP.radarOn = false; $('#radar').classList.remove('on'); $('.mapbar').classList.remove('radar'); MAP.labels.addTo(MAP.map); }
 }
 
 // ───────────────────────── navegación / UI ─────────────────────────
@@ -797,7 +831,7 @@ $('#btn-save').onclick = () => {
   $('#mtog').querySelectorAll('.sw').forEach(b => S.enabled[b.dataset.m] = b.classList.contains('on'));
   const mapChanged = (LS.get('keys', {}).carto || '') !== S.keys.carto;
   LS.set('keys', S.keys); LS.set('enabled', S.enabled);
-  if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && l !== MAP.radar) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
+  if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && !MAP.frames.some(f => f.layer === l)) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
   closeSheets(); load(true);
 };
 // gesto: deslizar la hoja hacia abajo para cerrar
