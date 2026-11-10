@@ -1,11 +1,9 @@
 /* Cielo — fondos de paisaje animados según el tiempo y la hora del día (estilo «foto del tiempo»).
-   Todo se dibuja en un canvas: cielo, sol/luna/estrellas, nubes, montes, lluvia, nieve, niebla y relámpagos.
-   Si el usuario ha elegido una foto propia para la condición actual, se muestra la foto en su lugar. */
+   Todo se dibuja en un canvas: cielo, sol/luna/estrellas, nubes, montes, lluvia, nieve, niebla y relámpagos. */
 'use strict';
 
 const Scene = (() => {
   const cv = document.getElementById('scene'), ctx = cv.getContext('2d');
-  const photoEl = document.getElementById('photo');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let W = 0, H = 0, dpr = 1, raf = null, last = 0, running = false;
   let st = { group: 'clear', phase: 'day', cat: 'clear' };
@@ -164,7 +162,7 @@ const Scene = (() => {
 
   function start() { if (running || document.hidden) return; running = true; raf = requestAnimationFrame(frame); }
   function stop() { running = false; if (raf) cancelAnimationFrame(raf); raf = null; }
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (document.body.classList.contains('scenic') && !document.body.classList.contains('has-photo')) start(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (document.body.classList.contains('scenic')) start(); });
   addEventListener('resize', () => { if (document.body.classList.contains('scenic')) resize(); });
 
   // fase del día a partir de salida/puesta (±50 min = amanecer/atardecer)
@@ -175,45 +173,17 @@ const Scene = (() => {
     return now > rise && now < set ? 'day' : 'night';
   }
 
-  // ---- fotos propias (IndexedDB) ----
-  const SLOTS = [
-    ['clear-day', 'Despejado de día'], ['clear-night', 'Despejado de noche'], ['cloudy', 'Nuboso / cubierto'],
-    ['rain', 'Lluvia'], ['storm', 'Tormenta'], ['snow', 'Nieve'], ['fog', 'Niebla'],
-  ];
-  const slotOf = (group, phase) => group === 'clear' || group === 'partly' ? (phase === 'night' ? 'clear-night' : 'clear-day') : group;
-  const db = () => new Promise((ok, ko) => { const r = indexedDB.open('cielo', 1); r.onupgradeneeded = () => r.result.createObjectStore('photos'); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
-  async function idb(mode, fn) { const d = await db(); return new Promise((ok, ko) => { const tx = d.transaction('photos', mode); const r = fn(tx.objectStore('photos')); tx.oncomplete = () => ok(r?.result); tx.onerror = () => ko(tx.error); }); }
-  const getPhoto = (k) => idb('readonly', s => s.get(k)).catch(() => null);
-  const setPhoto = (k, blob) => idb('readwrite', s => s.put(blob, k));
-  const delPhoto = (k) => idb('readwrite', s => s.delete(k));
-  async function listPhotos() { try { return new Set(await idb('readonly', s => s.getAllKeys())); } catch { return new Set(); } }
-  // reduce la foto a ~1600 px para no llenar el almacenamiento
-  async function shrink(file) {
-    try {
-      const bmp = await createImageBitmap(file); const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-      const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
-    } catch { return file; }
-  }
-  let photoURL = null;
+  // Las fotos propias se eliminaron: se borra la base de datos que usaban versiones anteriores.
+  try { indexedDB.deleteDatabase('cielo'); } catch {}
 
   async function set(cat, now, rise, set_) {
     const group = GROUP[cat] || 'partly', phase = phaseOf(now, rise, set_);
     const changed = group !== st.group || phase !== st.phase || cat !== st.cat || !bg;
     st = { group, phase, cat };
     // color de la barra de estado de iOS
-    const blob = await getPhoto(slotOf(group, phase));
-    if (photoURL) { URL.revokeObjectURL(photoURL); photoURL = null; }
-    if (blob) {
-      photoURL = URL.createObjectURL(blob);
-      photoEl.style.backgroundImage = `url(${photoURL})`; document.body.classList.add('has-photo'); stop();
-    } else {
-      photoEl.style.backgroundImage = ''; document.body.classList.remove('has-photo');
-      if (changed || !W) resize();
-      if (document.body.classList.contains('scenic')) start();
-    }
+    if (changed || !W) resize();
+    if (document.body.classList.contains('scenic')) start();
   }
 
-  return { set, start: () => { if (!document.body.classList.contains('has-photo')) { if (!W) resize(); start(); } }, stop, topColor: () => photoURL ? '#000000' : topColor(), SLOTS, setPhoto, delPhoto, listPhotos, shrink, active: () => !photoEl.style.backgroundImage };
+  return { set, start: () => { if (!W) resize(); start(); }, stop, topColor };
 })();

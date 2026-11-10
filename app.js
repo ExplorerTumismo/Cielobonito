@@ -30,6 +30,7 @@ const S = {
   tz: 'Europe/Madrid',
   view: LS.get('view', 'now'),
   hidden: new Set(LS.get('hidden', [])), // ocultos en meteograma
+  openModels: new Set(),                  // modelos con su gráfico desplegado en «Ahora»
   fetchedAt: null,
 };
 
@@ -402,28 +403,42 @@ function chartTable(cols, rows, COL, center = false) {
   return html + '</div></div>';
 }
 
-function hourlyChart(now) {
+// Fuente de datos para el gráfico horario: consenso entre modelos o un modelo concreto
+const CONS_SRC = {
+  v: (f, t) => f === 'pop' ? popAt(t) : f === 'dir' ? dirAt(t) : consensusAt(t, f === 'rain' ? 'precip' : f),
+  cat: (t) => catAt(t), night: (t) => !dayAt(t),
+};
+function modelSrc(m) {
+  const s = S.data[m];
+  return {
+    v: (f, t) => { const i = at(s, t); if (i < 0) return null; return f === 'pop' ? (s.pop?.[i] ?? null) : f === 'rain' ? s.precip[i] : s[f]?.[i] ?? null; },
+    cat: (t) => { const i = at(s, t); return i < 0 ? null : s.cat[i]; },
+    night: (t) => { const i = at(s, t); return i >= 0 && s.day[i] != null ? s.day[i] === 0 : !dayAt(t); },
+  };
+}
+function hourlyChart(now, m) {
+  const src = m ? modelSrc(m) : CONS_SRC;
   const cols = [], R = { temp: [], feel: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [] };
   const todayKey = fmt(now, { year: 'numeric', month: '2-digit', day: '2-digit' }), tomorrowKey = fmt(now + 864e5, { year: 'numeric', month: '2-digit', day: '2-digit' });
   for (let k = 0; k < 48; k++) {
-    const t = now + k * HOUR, temp = consensusAt(t, 'temp');
+    const t = now + k * HOUR, temp = src.v('temp', t);
     if (temp == null) continue;
     const h = localHour(t), dkey = fmt(t, { year: 'numeric', month: '2-digit', day: '2-digit' });
     const top = !cols.length ? (dkey === todayKey ? 'Hoy' : 'Mañana') : h === 0 ? (dkey === tomorrowKey ? 'Mañana' : fmt(t, { weekday: 'short' })) : '';
-    cols.push({ top, icon: icon(catAt(t), !dayAt(t)), label: k === 0 ? 'Ahora' : String(h).padStart(2, '0') });
-    R.temp.push(temp); R.feel.push(consensusAt(t, 'feel')); R.pop.push(popAt(t)); R.rain.push(consensusAt(t, 'precip'));
-    R.wind.push(consensusAt(t, 'wind')); R.dir.push(dirAt(t)); R.gust.push(consensusAt(t, 'gust')); R.hum.push(consensusAt(t, 'hum'));
+    cols.push({ top, icon: icon(src.cat(t), src.night(t)), label: k === 0 ? 'Ahora' : String(h).padStart(2, '0') });
+    for (const f of Object.keys(R)) R[f].push(f === 'temp' ? temp : src.v(f, t));
   }
-  if (!cols.length) return '';
+  if (!cols.length) return '<div class="note" style="padding:12px">Sin datos para las próximas horas.</div>';
+  const hasPop = R.pop.some(p => p != null);
   const rows = [
     { key: 'temp', title: 'Temperatura', unit: '°C', type: 'line', v: R.temp, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 58 },
     { key: 'feel', title: 'Sensación térmica', unit: '°C', type: 'line', v: R.feel, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 58 },
-    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 2, h: 60 },
+    { key: 'rain', title: 'Precipitación', unit: hasPop ? 'probabilidad % · mm' : 'mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: hasPop ? R.pop : null, color: C_BLUE, fmt: v => nf(v, 1), max: 2, h: hasPop ? 60 : 46 },
     { key: 'wind', title: 'Viento', unit: 'km/h', type: 'line', v: R.wind, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
     { key: 'gust', title: 'Ráfagas', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'hum', title: 'Humedad', unit: '%', type: 'line', v: R.hum, color: C_BLUE, fmt: v => Math.round(v), zero: true, max: 100 },
-  ];
+  ].filter(r => r.type === 'arrows' ? r.v.some(x => x != null) : r.v.some(x => x != null));
   return chartTable(cols, rows, 46);
 }
 
@@ -512,22 +527,26 @@ function renderNow() {
 
   html += renderExtras(now);
 
-  // por modelo
-  html += `<div class="sec"><h3>Ahora por modelo</h3><div class="card">`;
+  // por modelo (con gráfico horario desplegable de cada uno)
+  const CHEV = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg>';
+  html += `<div class="sec"><h3>Ahora por modelo</h3><div class="card mcard">`;
   for (const m of ORDER) {
     const s = S.data[m]; const M = MODELS[m];
     if (!s || !S.enabled[m]) {
-      html += `<div class="row off"><i class="dot" style="background:${mcolor(m)}"></i><div><div class="nm">${M.name}</div><div class="ds">${M.sub}</div></div><div class="tp">${esc(S.status[m] || 'Sin datos')}</div></div>`;
+      html += `<div class="row off"><span></span><i class="dot" style="background:${mcolor(m)}"></i><div><div class="nm">${M.name}</div><div class="ds">${M.sub}</div></div><div class="tp">${esc(S.status[m] || 'Sin datos')}</div></div>`;
       continue;
     }
     const i = nearestIdx(s, now);
     const p6 = sumPrecip(m, now, now + 6 * HOUR);
     const label = s.label ? `${M.sub} · ${esc(s.label)}` : M.sub;
-    html += `<div class="row"><i class="dot" style="background:${mcolor(m)}"></i>
+    const open = S.openModels.has(m);
+    html += `<div class="row${open ? ' open' : ''}" data-exp="${m}" role="button" aria-expanded="${open}" aria-label="Ver gráfico de ${M.name}">
+      <span class="exp">${CHEV}</span><i class="dot" style="background:${mcolor(m)}"></i>
       <div style="min-width:0"><div class="nm">${M.name}</div><div class="ds">${label}</div></div>
       <div class="ic">${i < 0 ? '' : icon(s.cat[i], s.day[i] === 0)}</div>
       <div class="tp num">${i < 0 ? '–' : fmtT(s.temp[i])}</div>
-      <div class="xt num">${i < 0 || s.wind[i] == null ? '–' : Math.round(s.wind[i]) + ' km/h ' + windDir(s.dir[i])}<br>${p6 == null ? '' : (round(p6, 1) + ' mm/6h').replace('.', ',')}</div></div>`;
+      <div class="xt num">${i < 0 || s.wind[i] == null ? '–' : Math.round(s.wind[i]) + ' km/h ' + windDir(s.dir[i])}<br>${p6 == null ? '' : (round(p6, 1) + ' mm/6h').replace('.', ',')}</div></div>
+      <div class="mchart" id="mc-${m}">${open ? hourlyChart(now, m) : ''}</div>`;
   }
   html += `</div></div>`;
 
@@ -548,6 +567,12 @@ function renderNow() {
   }
   html += `<p class="note">Temperatura principal: mediana de los modelos disponibles. La coincidencia mide la dispersión de temperatura entre ellos ahora mismo.</p>`;
   v.innerHTML = html;
+  v.querySelectorAll('[data-exp]').forEach(r => r.onclick = () => {
+    const m = r.dataset.exp, box = $('#mc-' + m), open = !S.openModels.has(m);
+    open ? S.openModels.add(m) : S.openModels.delete(m);
+    r.classList.toggle('open', open); r.setAttribute('aria-expanded', open);
+    box.innerHTML = open ? hourlyChart(floorHour(Date.now() + 30 * 60e3), m) : '';
+  });
   // fondo de paisaje acorde al tiempo y la hora
   const todayNoon = zoned(fmt(Date.now(), { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'), 12, S.tz);
   const sn = sunTimes(todayNoon, S.loc.lat, S.loc.lon);
@@ -740,7 +765,8 @@ function initMap() {
   if (MAP.map) { if (Date.now() - MAP.radarAt > 10 * 60e3) loadRadar(); return; }
   if (!window.L) { toast('El mapa necesita conexión la primera vez'); return; }
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  MAP.map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 12 }).setView([40.2, -3.6], 5);
+  MAP.map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 11, zoomSnap: 0.5, bounceAtZoomLimits: false })
+    .setView([S.loc.lat, S.loc.lon], 7); // x4 respecto a la vista de toda España (zoom 5)
   baseLayers(dark).forEach(l => l.addTo(MAP.map));
   MAP.map.on('click', (e) => setLocation({ lat: e.latlng.lat, lon: e.latlng.lng, name: null }));
   placeMarker();
@@ -761,15 +787,23 @@ function baseLayers(dark) {
 }
 function placeMarker() {
   if (!MAP.map) return;
+  if (MAP.centeredOn !== S.loc.lat + ',' + S.loc.lon) { MAP.centeredOn = S.loc.lat + ',' + S.loc.lon; MAP.map.setView([S.loc.lat, S.loc.lon], Math.max(MAP.map.getZoom(), 7)); }
   const ll = [S.loc.lat, S.loc.lon];
   if (!MAP.marker) MAP.marker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), zIndexOffset: 1000 }).addTo(MAP.map);
   else MAP.marker.setLatLng(ll);
 }
 // Radar (RainViewer): solo ofrece las últimas 2 horas, en imágenes cada 10 minutos; no hay predicción.
 function setSlider(min, max, val) { const r = $('#mapt'); r.min = min; r.max = max; r.value = val; }
+function radarLayer(f) {
+  return L.tileLayer(`${MAP.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+    opacity: 0.75, maxNativeZoom: 7, maxZoom: 11, updateWhenZooming: false, keepBuffer: 0, attribution: 'Radar © RainViewer' });
+}
 function showFrame(k) {
-  MAP.frames.forEach((f, i) => f.layer.setOpacity(i === k ? 0.75 : 0));
-  const f = MAP.frames[k]; if (!f) return;
+  const f = MAP.frames[k]; if (!f || !MAP.map) return;
+  // una sola capa de radar en pantalla: la nueva se añade y la anterior se quita al cargar
+  const prev = MAP.radar, next = radarLayer(f);
+  MAP.radar = next; next.addTo(MAP.map);
+  if (prev) { const drop = () => { if (MAP.map.hasLayer(prev)) MAP.map.removeLayer(prev); }; next.once('load', drop); setTimeout(drop, 1500); }
   const ago = Math.round((Date.now() - f.time) / 60e3);
   $('#mapt-l').innerHTML = `<b>${fmt(f.time, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</b>${k === MAP.frames.length - 1 ? ' · última imagen' : ` · hace ${ago} min`}`;
 }
@@ -780,7 +814,7 @@ function togglePlay() {
   if (MAP.play) return stopPlay();
   if (!MAP.frames.length) return;
   $('#play').innerHTML = PAUSE_ICON;
-  MAP.play = setInterval(() => { const r = $('#mapt'); const v = (+r.value + 1) % MAP.frames.length; r.value = v; showFrame(v); }, 700);
+  MAP.play = setInterval(() => { const r = $('#mapt'); const v = (+r.value + 1) % MAP.frames.length; r.value = v; showFrame(v); }, 1000);
 }
 async function loadRadar() {
   stopPlay();
@@ -788,9 +822,8 @@ async function loadRadar() {
     const j = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
     const frames = [...(j.radar?.past || []), ...(j.radar?.nowcast || [])];
     if (!frames.length) throw new Error('vacío');
-    MAP.frames.forEach(f => MAP.map.removeLayer(f.layer));
-    MAP.frames = frames.map(f => ({ time: f.time * 1000,
-      layer: L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxNativeZoom: 7, maxZoom: 12, attribution: 'Radar © RainViewer' }).addTo(MAP.map) }));
+    MAP.host = j.host;
+    MAP.frames = frames.map(f => ({ time: f.time * 1000, path: f.path }));
     MAP.radarAt = Date.now();
     setSlider(0, MAP.frames.length - 1, MAP.frames.length - 1);
     showFrame(MAP.frames.length - 1);
@@ -909,7 +942,6 @@ $('#btn-set').onclick = () => {
   $('#k-aemet').value = S.keys.aemet; $('#k-carto').value = S.keys.carto || ''; $('#k-proxy').value = S.keys.proxy;
   $('#mtog').innerHTML = ORDER.map(m => `<div class="tog"><span><i class="dot" style="display:inline-block;margin-right:8px;background:${mcolor(m)}"></i>${MODELS[m].name} <span style="color:var(--mute);font-size:12px">${MODELS[m].sub}</span></span><button class="sw ${S.enabled[m] ? 'on' : ''}" data-m="${m}" aria-label="${MODELS[m].name}"></button></div>`).join('');
   $('#mtog').querySelectorAll('.sw').forEach(b => b.onclick = () => b.classList.toggle('on'));
-  renderPhotos();
   openSheet('#sh-set');
 };
 $('#btn-save').onclick = () => {
@@ -917,31 +949,9 @@ $('#btn-save').onclick = () => {
   $('#mtog').querySelectorAll('.sw').forEach(b => S.enabled[b.dataset.m] = b.classList.contains('on'));
   const mapChanged = (LS.get('keys', {}).carto || '') !== S.keys.carto;
   LS.set('keys', S.keys); LS.set('enabled', S.enabled);
-  if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && !MAP.frames.some(f => f.layer === l)) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
+  if (mapChanged && MAP.map) { MAP.map.eachLayer(l => { if (l instanceof L.TileLayer && l !== MAP.radar) MAP.map.removeLayer(l); }); baseLayers(matchMedia('(prefers-color-scheme: dark)').matches).forEach(l => l.addTo(MAP.map).bringToBack()); }
   closeSheets(); load(true);
 };
-// fondos propios por condición
-let photoSlot = null;
-async function renderPhotos() {
-  const have = await Scene.listPhotos();
-  const thumbs = {};
-  $('#photos').innerHTML = Scene.SLOTS.map(([k, n]) => `<div class="prow"><div class="thumb" data-k="${k}"></div><span class="pn">${n}</span>
-    ${have.has(k) ? `<button class="rm" data-rm="${k}">Quitar</button>` : ''}<button data-pick="${k}">${have.has(k) ? 'Cambiar' : 'Elegir foto'}</button></div>`).join('');
-  $('#photos').querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { photoSlot = b.dataset.pick; $('#photo-in').value = ''; $('#photo-in').click(); });
-  $('#photos').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { await Scene.delPhoto(b.dataset.rm); renderPhotos(); renderNow(); });
-  // miniaturas
-  for (const k of have) {
-    const blob = await new Promise(r => { const q = indexedDB.open('cielo', 1); q.onsuccess = () => { const g = q.result.transaction('photos').objectStore('photos').get(k); g.onsuccess = () => r(g.result); g.onerror = () => r(null); }; q.onerror = () => r(null); });
-    const el = $(`#photos .thumb[data-k="${k}"]`); if (blob && el) el.style.backgroundImage = `url(${URL.createObjectURL(blob)})`;
-  }
-}
-$('#photo-in').onchange = async (e) => {
-  const f = e.target.files?.[0]; if (!f || !photoSlot) return;
-  try { await Scene.setPhoto(photoSlot, await Scene.shrink(f)); toast('Foto guardada'); }
-  catch { toast('No se pudo guardar la foto'); }
-  renderPhotos(); renderNow();
-};
-
 // gesto: deslizar la hoja hacia abajo para cerrar
 document.querySelectorAll('.sheet').forEach(sh => {
   let y0 = null;

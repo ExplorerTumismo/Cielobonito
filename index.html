@@ -64,7 +64,7 @@ nav svg{width:24px;height:24px}
 .sec{margin-top:22px}
 .sec h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);font-weight:600;margin:0 0 8px}
 .card{background:var(--card);border-radius:18px;padding:4px 14px}
-.row{display:grid;grid-template-columns:10px 1fr 28px 46px 64px;align-items:center;gap:10px;padding:11px 0;border-bottom:.5px solid var(--line)}
+.row{display:grid;grid-template-columns:18px 10px 1fr 26px 44px 62px;align-items:center;gap:8px;padding:11px 0;border-bottom:.5px solid var(--line)}
 .row:last-child{border-bottom:0}
 .dot{width:10px;height:10px;border-radius:50%}
 .row .nm{font-weight:600;font-size:15px}
@@ -73,7 +73,14 @@ nav svg{width:24px;height:24px}
 .row .tp{font-size:20px;font-weight:450;text-align:right}
 .row .xt{font-size:11.5px;color:var(--mute);text-align:right;line-height:1.3}
 .row.off{opacity:.45}
-.row.off .tp{font-size:12px;font-weight:500;grid-column:3/6;text-align:right;color:var(--mute)}
+.row[data-exp]{cursor:pointer}
+.row .exp{width:18px;height:18px;border-radius:9px;background:var(--soft);display:grid;place-items:center;transition:transform .2s}
+.row .exp svg{width:10px;height:10px}
+.row.open .exp{transform:rotate(90deg)}
+.mcard{overflow:hidden}
+.mchart{margin:0 -14px}
+.mchart:not(:empty){border-bottom:.5px solid var(--line);background:rgba(0,0,0,.18)}
+.row.off .tp{font-size:12px;font-weight:500;grid-column:4/7;text-align:right;color:var(--mute)}
 .strip{display:flex;overflow-x:auto;gap:2px;scrollbar-width:none;padding:10px 4px}
 .strip::-webkit-scrollbar{display:none}
 .strip .h{flex:none;width:52px;text-align:center;font-size:12px;color:var(--mute)}
@@ -194,11 +201,8 @@ nav svg{width:24px;height:24px}
 .cellax{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mute);margin-top:4px}
 
 /* ---------- modo paisaje (pestaña Ahora) ---------- */
-#photo,#scene{position:fixed;inset:0;width:100%;height:100%;display:none;z-index:0}
-#photo{background:#000 center/cover no-repeat}
-#photo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.55),rgba(0,0,0,.38) 30%,rgba(0,0,0,.5) 60%,rgba(0,0,0,.7))}
-body.scenic:not(.has-photo) #scene{display:block}
-body.scenic.has-photo #photo{display:block}
+#scene{position:fixed;inset:0;width:100%;height:100%;display:none;z-index:0}
+body.scenic #scene{display:block}
 body.scenic{background:#000}
 #app{z-index:1}
 body.scenic header,body.scenic nav,body.scenic #v-now{
@@ -248,7 +252,7 @@ body.scenic #v-now .sec h3,body.scenic #v-now .note{color:#fff;text-shadow:0 1px
 </style>
 </head>
 <body>
-<div id="photo"></div><canvas id="scene" aria-hidden="true"></canvas>
+<canvas id="scene" aria-hidden="true"></canvas>
 <div id="app">
   <header>
     <button id="place" aria-label="Cambiar ubicación">
@@ -296,10 +300,6 @@ body.scenic #v-now .sec h3,body.scenic #v-now .note{color:#fff;text-shadow:0 1px
     <small>Gratuita en <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">carto.com/basemaps/apikey</a>. Solo cambia el estilo del fondo del mapa.</small></div>
   <div class="field"><label>URL del proxy (opcional)</label><input id="k-proxy" type="url" autocomplete="off" placeholder="https://cielo-proxy.tuusuario.workers.dev">
     <small>Si AEMET bloquea la petición desde el navegador (CORS), despliega <b>proxy/worker.js</b> y pon aquí su URL. Con proxy, la clave se guarda en el servidor y puedes dejar vacía la de arriba.</small></div>
-  <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Fondos de «Ahora»</h3>
-  <p class="note" style="margin:0 0 8px">Sin foto, se dibuja un paisaje animado según el tiempo y la hora. Puedes poner tus propias fotos para cada situación.</p>
-  <div class="card" id="photos"></div>
-  <input type="file" id="photo-in" accept="image/*" hidden>
   <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
   <div class="card" id="mtog"></div>
   <button class="btn pri" id="btn-save">Guardar</button>
