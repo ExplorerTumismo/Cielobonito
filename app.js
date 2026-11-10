@@ -1,5 +1,5 @@
 /* Cielo — PWA del tiempo multimodelo para España
-   Fuentes: AEMET OpenData (predicción municipal horaria), Meteocat (predicció municipal horària),
+   Fuentes: AEMET OpenData (predicción municipal horaria),
    Open-Meteo (AROME Météo-France, ECMWF IFS, DWD ICON). */
 'use strict';
 
@@ -7,14 +7,12 @@
 const MODELS = {
   aemet:    { name: 'AEMET',    sub: 'Predicción municipal',   css: '--m-aemet' },
   arome:    { name: 'AROME',    sub: 'Météo-France · 2,5 km',  css: '--m-arome' },
-  meteocat: { name: 'Meteocat', sub: 'Predicció municipal',    css: '--m-meteocat' },
   ecmwf:    { name: 'ECMWF',    sub: 'IFS · 0,25°',            css: '--m-ecmwf' },
   icon:     { name: 'ICON',     sub: 'DWD · seamless',         css: '--m-icon' },
 };
-const ORDER = ['aemet', 'arome', 'meteocat', 'ecmwf', 'icon'];
+const ORDER = ['aemet', 'arome', 'ecmwf', 'icon'];
 const OM_MODELS = { arome: 'meteofrance_arome_france', ecmwf: 'ecmwf_ifs025', icon: 'icon_seamless' };
 const OM_VARS = 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,relative_humidity_2m,cloud_cover,is_day,cape,lifted_index,lightning_potential';
-const CAT_BBOX = { s: 40.50, n: 42.90, w: 0.15, e: 3.35 };
 const HOUR = 3600e3;
 
 
@@ -25,8 +23,8 @@ const LS = {
 };
 const S = {
   loc: LS.get('loc', { name: 'Madrid', admin: 'Comunidad de Madrid', lat: 40.4168, lon: -3.7038 }),
-  keys: LS.get('keys', { aemet: '', meteocat: '', proxy: '' }),
-  enabled: LS.get('enabled', { aemet: true, arome: true, meteocat: true, ecmwf: true, icon: true }),
+  keys: LS.get('keys', { aemet: '', proxy: '' }),
+  enabled: LS.get('enabled', { aemet: true, arome: true, ecmwf: true, icon: true }),
   data: {},       // modelo -> serie normalizada
   status: {},     // modelo -> mensaje si no hay datos
   tz: 'Europe/Madrid',
@@ -84,12 +82,6 @@ function catAEMET(v) {
   if ((c >= 51 && c <= 54) || (c >= 61 && c <= 64)) return 'storm';
   if (c >= 81 && c <= 83) return 'fog';
   return 'cloudy';
-}
-function catMeteocat(v) { // símbolos de estat del cel de Meteocat (aproximado)
-  const c = parseInt(v, 10); if (isNaN(c)) return null;
-  const map = { 1: 'clear', 2: 'clear', 3: 'partly', 4: 'partly', 20: 'partly', 21: 'cloudy', 22: 'overcast', 5: 'cloudy', 6: 'drizzle', 7: 'drizzle',
-    8: 'storm', 9: 'storm', 10: 'rain', 11: 'fog', 12: 'fog', 23: 'rain', 24: 'rain', 25: 'storm', 26: 'snow', 27: 'snow', 28: 'snow', 29: 'snow', 30: 'rain', 31: 'storm', 32: 'storm', 33: 'storm' };
-  return map[c] || null;
 }
 function icon(cat, night = false) {
   const sun = night
@@ -228,45 +220,6 @@ async function fetchAEMET(lat, lon) {
   return s;
 }
 
-// Meteocat
-async function meteocat(path) {
-  const p = proxy();
-  if (!p && !S.keys.meteocat) throw new Error('nokey');
-  return p ? getJSON(`${p}/meteocat${path}`) : getJSON(`https://api.meteo.cat${path}`, { headers: { 'X-Api-Key': S.keys.meteocat } });
-}
-async function fetchMeteocat(lat, lon) {
-  if (lat < CAT_BBOX.s || lat > CAT_BBOX.n || lon < CAT_BBOX.w || lon > CAT_BBOX.e) throw new Error('fuera');
-  let list = LS.get('meteocat.mun', null);
-  if (!list || list.length < 500) {
-    const raw = await meteocat('/referencia/v1/municipis');
-    list = raw.map(m => [m.codi, +m.coordenades?.latitud, +m.coordenades?.longitud, m.nom]).filter(m => !isNaN(m[1]));
-    LS.set('meteocat.mun', list);
-  }
-  const nn = nearest(list, lat, lon);
-  if (!nn || nn.km > 12) throw new Error('fuera');
-  const j = await meteocat('/pronostic/v1/municipalHoraria/' + nn.m[0]);
-  const map = new Map();
-  const KEY = { temp: 'temp', tempXafogor: 'feel', precipitacio: 'precip', humitat: 'hum', velVent: 'wind', dirVent: 'dir', estatCel: 'cat' };
-  for (const d of j.dies || []) {
-    for (const [name, obj] of Object.entries(d.variables || {})) {
-      const k = KEY[name]; if (!k) continue;
-      const arr = obj.valors || obj.valor || [];
-      const ms = /m\/s/.test(obj.unitat || '') ? 3.6 : 1;
-      for (const x of arr) {
-        const t = floorHour(Date.parse(x.data)); if (isNaN(t)) continue;
-        if (!map.has(t)) map.set(t, {});
-        let v = x.valor;
-        if (k === 'cat') v = catMeteocat(v);
-        else { v = parseFloat(v); if (isNaN(v)) v = null; else if (k === 'wind') v *= ms; }
-        map.get(t)[k] = v;
-      }
-    }
-  }
-  for (const [t, o] of map) if (o.temp == null) map.delete(t);
-  const s = fromMap(map); s.label = nn.m[3];
-  return s;
-}
-
 // Calidad del aire (CAMS Europa vía Open-Meteo, índice europeo EAQI)
 async function fetchAir(lat, lon) {
   const j = await getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}`
@@ -330,7 +283,6 @@ async function load(force = false) {
   const jobs = [
     fetchOpenMeteo(lat, lon),
     S.enabled.aemet ? fetchAEMET(lat, lon).then(r => ({ aemet: r }), e => { S.status.aemet = e.message === 'nokey' ? 'Añade la API key en Ajustes' : e.message === 'lejos' ? 'Sin municipio cercano' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
-    S.enabled.meteocat ? fetchMeteocat(lat, lon).then(r => ({ meteocat: r }), e => { S.status.meteocat = e.message === 'fuera' ? 'Solo Catalunya' : e.message === 'nokey' ? 'Añade la API key en Ajustes' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
   ];
   const airJob = fetchAir(lat, lon).then(a => { S.air = a; }, () => { S.air = null; });
   const res = await Promise.all(jobs); await airJob;
@@ -766,7 +718,7 @@ function renderMG() {
     <div class="readout num" id="ro">Desliza sobre el gráfico para comparar los modelos hora a hora.</div>
     <div class="mg"><svg class="yax" width="34" height="${HT}">${ya}</svg>
       <div class="sc" id="mgsc"><svg id="mgsvg" width="${W}" height="${HT}" style="display:block">${g}</svg></div></div>
-    <p class="note">Líneas: un color por modelo · banda gris: rango entre modelos · barras: mediana de precipitación (sólida) y máximo de cualquier modelo (clara) · fondo sombreado: noche. AROME llega a ~2 días, AEMET y Meteocat a ~3; ECMWF e ICON completan la semana.</p>`;
+    <p class="note">Líneas: un color por modelo · banda gris: rango entre modelos · barras: mediana de precipitación (sólida) y máximo de cualquier modelo (clara) · fondo sombreado: noche. AROME llega a ~2 días, AEMET a ~3; ECMWF e ICON completan la semana.</p>`;
 
   v.querySelectorAll('.chip').forEach(b => b.onclick = () => { const m = b.dataset.m; S.hidden.has(m) ? S.hidden.delete(m) : S.hidden.add(m); LS.set('hidden', [...S.hidden]); const sl = $('#mgsc').scrollLeft; renderMG(); $('#mgsc').scrollLeft = sl; });
   const svg = $('#mgsvg'), cur = $('#cursor'), ro = $('#ro');
@@ -954,14 +906,14 @@ $('#q').oninput = (e) => {
   }, 280);
 };
 $('#btn-set').onclick = () => {
-  $('#k-aemet').value = S.keys.aemet; $('#k-carto').value = S.keys.carto || ''; $('#k-meteocat').value = S.keys.meteocat; $('#k-proxy').value = S.keys.proxy;
+  $('#k-aemet').value = S.keys.aemet; $('#k-carto').value = S.keys.carto || ''; $('#k-proxy').value = S.keys.proxy;
   $('#mtog').innerHTML = ORDER.map(m => `<div class="tog"><span><i class="dot" style="display:inline-block;margin-right:8px;background:${mcolor(m)}"></i>${MODELS[m].name} <span style="color:var(--mute);font-size:12px">${MODELS[m].sub}</span></span><button class="sw ${S.enabled[m] ? 'on' : ''}" data-m="${m}" aria-label="${MODELS[m].name}"></button></div>`).join('');
   $('#mtog').querySelectorAll('.sw').forEach(b => b.onclick = () => b.classList.toggle('on'));
   renderPhotos();
   openSheet('#sh-set');
 };
 $('#btn-save').onclick = () => {
-  S.keys = { aemet: $('#k-aemet').value.trim(), meteocat: $('#k-meteocat').value.trim(), proxy: $('#k-proxy').value.trim(), carto: $('#k-carto').value.trim() };
+  S.keys = { aemet: $('#k-aemet').value.trim(), proxy: $('#k-proxy').value.trim(), carto: $('#k-carto').value.trim() };
   $('#mtog').querySelectorAll('.sw').forEach(b => S.enabled[b.dataset.m] = b.classList.contains('on'));
   const mapChanged = (LS.get('keys', {}).carto || '') !== S.keys.carto;
   LS.set('keys', S.keys); LS.set('enabled', S.enabled);
