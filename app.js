@@ -412,7 +412,7 @@ function chartTable(cols, rows, COL, center = false) {
       html += `<div class="hc-arrows">${r.v.map(d => `<div style="width:${COL}px">${d == null ? '' : `<svg viewBox="0 0 24 24" style="transform:rotate(${(d + 180) % 360}deg)"><path d="M12 20V4M6 10l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`}</div>`).join('')}</div></div>`;
       continue;
     }
-    const H = r.h || 30, top = r.type === 'bars' && r.v2 ? 22 : 13, bot = r.type === 'dual' ? H - 13 : H - 2, base = r.type === 'dual' ? H - 1 : bot;
+    const H = r.h || 54, top = r.type === 'bars' && r.v2 ? 30 : 17, bot = r.type === 'dual' ? H - 17 : H - 3, base = r.type === 'dual' ? H - 2 : bot;
     let lo = Math.min(...vals), hi = Math.max(...vals);
     if (r.type === 'bars' || r.zero) lo = 0;
     if (r.max != null) hi = Math.max(hi, r.max);
@@ -426,11 +426,11 @@ function chartTable(cols, rows, COL, center = false) {
       r.v.forEach((v, k) => {
         if (v == null) return;
         if (v > 0) s += `<rect x="${k * COL + COL * 0.28}" y="${Y(v)}" width="${COL * 0.44}" height="${bot - Y(v)}" rx="2" fill="${r.color}" opacity=".85"/>`;
-        s += `<text x="${cx(k)}" y="${(v > 0 ? Y(v) : bot) - 2}" class="${v > 0 ? 'on' : ''}">${r.fmt(v)}</text>`;
+        s += `<text x="${cx(k)}" y="${(v > 0 ? Y(v) : bot) - 4}" class="${v > 0 ? 'on' : ''}">${r.fmt(v)}</text>`;
       });
-      if (r.v2) r.v2.forEach((p, k) => { if (p != null) s += `<text x="${cx(k)}" y="8" class="sm" style="fill:${p >= 50 ? '#8cc4ff' : 'var(--mute)'}">${p}%</text>`; });
+      if (r.v2) r.v2.forEach((p, k) => { if (p != null) s += `<text x="${cx(k)}" y="11" class="sm" style="fill:${p >= 50 ? '#8cc4ff' : 'var(--mute)'}">${p}%</text>`; });
     } else {
-      const series = r.type === 'dual' ? [[r.v, r.color, -3], [r.v2, r.color2, 11]] : [[r.v, r.color, -3]];
+      const series = r.type === 'dual' ? [[r.v, r.color, -5], [r.v2, r.color2, 14]] : [[r.v, r.color, -5]];
       series.forEach(([arr, col, dy], si) => {
         let d = '', first = null, lastX = null;
         arr.forEach((v, k) => { if (v == null) return; const x = cx(k), y = Y(v); d += (first == null ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1); if (first == null) first = x; lastX = x; });
@@ -464,9 +464,9 @@ function hourlyChart(now) {
   }
   if (!cols.length) return '';
   const rows = [
-    { key: 'temp', title: 'Temperatura', unit: '°C', type: 'line', v: R.temp, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 30 },
-    { key: 'feel', title: 'Sensación térmica', unit: '°C', type: 'line', v: R.feel, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 30 },
-    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 2, h: 36 },
+    { key: 'temp', title: 'Temperatura', unit: '°C', type: 'line', v: R.temp, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 58 },
+    { key: 'feel', title: 'Sensación térmica', unit: '°C', type: 'line', v: R.feel, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 58 },
+    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 2, h: 60 },
     { key: 'wind', title: 'Viento', unit: 'km/h', type: 'line', v: R.wind, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
     { key: 'gust', title: 'Ráfagas', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
@@ -518,9 +518,9 @@ function dailyChart() {
   }
   if (!cols.length) return '';
   const rows = [
-    { key: 'temp', title: 'Temperatura máx. / mín.', unit: '°C', type: 'dual', v: R.tmax, v2: R.tmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 44, minSpan: 6 },
-    { key: 'feel', title: 'Sensación máx. / mín.', unit: '°C', type: 'dual', v: R.fmax, v2: R.fmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 44, minSpan: 6 },
-    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 5, h: 36 },
+    { key: 'temp', title: 'Temperatura máx. / mín.', unit: '°C', type: 'dual', v: R.tmax, v2: R.tmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 78, minSpan: 6 },
+    { key: 'feel', title: 'Sensación máx. / mín.', unit: '°C', type: 'dual', v: R.fmax, v2: R.fmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 78, minSpan: 6 },
+    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 5, h: 60 },
     { key: 'wind', title: 'Viento máx.', unit: 'km/h', type: 'line', v: R.wind, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
     { key: 'gust', title: 'Ráfagas máx.', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
