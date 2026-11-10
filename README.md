@@ -4,8 +4,8 @@ App web instalable (PWA) pensada para iPhone 17 (402 × 874 pt, Dynamic Island, 
 Compara varios modelos y predicciones para cualquier punto de España, Baleares, Canarias, Ceuta y Melilla.
 
 ## Pestañas
-- **Mapa** — temperaturas de ~55 capitales con el modelo elegido (AROME / ECMWF / ICON), deslizador de +0 a +48 h y capa de radar (RainViewer). Toca el mapa para elegir una ubicación.
-- **Ahora** — temperatura de consenso (mediana), indicador de coincidencia entre modelos, próximas 24 h y el valor de cada modelo ahora mismo; rango de máx/mín de hoy.
+- **Mapa** — radar de precipitación (RainViewer) de las últimas 2 horas, con deslizador y reproducción. Toca el mapa para elegir una ubicación.
+- **Ahora** — temperatura de consenso (mediana) y coincidencia entre modelos; gráficos de próximas 48 horas y próximos días (temperatura, sensación, probabilidad y mm de precipitación, viento con dirección, ráfagas, humedad); sol, calidad del aire, tormenta y valor de cada modelo.
 - **Meteograma** — hasta 7 días: temperatura (una línea por modelo + banda de dispersión), precipitación (mediana y máximo) y viento con rachas. Desliza el dedo para leer los valores hora a hora; toca las etiquetas para ocultar modelos.
 
 ## Aspecto

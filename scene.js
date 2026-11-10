@@ -90,10 +90,12 @@ const Scene = (() => {
     // --- sombreado para que el texto blanco se lea sobre cielos claros ---
     shade = document.createElement('canvas'); shade.width = W; shade.height = H;
     const sh = shade.getContext('2d');
-    const bright = (st.group === 'snow' || st.group === 'fog' || (st.phase === 'day' && st.group !== 'storm' && st.group !== 'rain')) ? 1 : 0.55;
+    // velo general (más fuerte en cielos claros) + degradado más oscuro hacia abajo, donde van los datos
+    const bright = (st.group === 'snow' || st.group === 'fog' || (st.phase === 'day' && st.group !== 'storm' && st.group !== 'rain')) ? 1 : 0.6;
+    sh.fillStyle = `rgba(0,0,0,${0.22 + 0.2 * bright})`; sh.fillRect(0, 0, W, H);
     let sg = sh.createLinearGradient(0, 0, 0, H);
-    sg.addColorStop(0, `rgba(0,0,0,${0.22 * bright})`); sg.addColorStop(0.14, 'rgba(0,0,0,0)');
-    sg.addColorStop(0.42, 'rgba(0,0,0,0)'); sg.addColorStop(0.62, `rgba(0,0,0,${0.24 * bright})`); sg.addColorStop(1, `rgba(0,0,0,${0.5 * bright})`);
+    sg.addColorStop(0, `rgba(0,0,0,${0.18 * bright})`); sg.addColorStop(0.2, 'rgba(0,0,0,0)');
+    sg.addColorStop(0.4, 'rgba(0,0,0,0)'); sg.addColorStop(0.7, `rgba(0,0,0,${0.3 * bright + 0.1})`); sg.addColorStop(1, `rgba(0,0,0,${0.45 * bright + 0.15})`);
     sh.fillStyle = sg; sh.fillRect(0, 0, W, H);
     // --- partículas ---
     const nC = { clear: 1, partly: 5, cloudy: 11, rain: 10, storm: 10, snow: 8, fog: 4 }[st.group];

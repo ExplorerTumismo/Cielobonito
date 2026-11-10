@@ -17,18 +17,6 @@ const OM_VARS = 'temperature_2m,apparent_temperature,precipitation,weather_code,
 const CAT_BBOX = { s: 40.50, n: 42.90, w: 0.15, e: 3.35 };
 const HOUR = 3600e3;
 
-const CITIES = [
-  ['A Coruña',43.37,-8.40],['Oviedo',43.36,-5.85],['Santander',43.46,-3.80],['Bilbao',43.26,-2.93],['Donostia',43.32,-1.98],
-  ['Pamplona',42.81,-1.64],['Logroño',42.47,-2.45],['Vigo',42.24,-8.72],['Lugo',43.01,-7.56],['Ourense',42.34,-7.86],['León',42.60,-5.57],
-  ['Burgos',42.34,-3.70],['Huesca',42.14,-0.41],['Girona',41.98,2.82],['Lleida',41.62,0.62],['Barcelona',41.39,2.17],['Tarragona',41.12,1.25],
-  ['Zaragoza',41.65,-0.88],['Soria',41.76,-2.46],['Valladolid',41.65,-4.72],['Zamora',41.50,-5.75],['Salamanca',40.96,-5.66],['Segovia',40.95,-4.12],
-  ['Madrid',40.42,-3.70],['Guadalajara',40.63,-3.16],['Teruel',40.34,-1.11],['Castelló',39.99,-0.05],['Cuenca',40.07,-2.14],['Cáceres',39.47,-6.37],
-  ['Toledo',39.86,-4.03],['València',39.47,-0.38],['Palma',39.57,2.65],['Maó',39.89,4.27],['Eivissa',38.91,1.43],['Badajoz',38.88,-6.97],
-  ['Ciudad Real',38.98,-3.93],['Albacete',38.99,-1.86],['Alacant',38.35,-0.48],['Murcia',37.99,-1.13],['Córdoba',37.88,-4.78],['Jaén',37.78,-3.79],
-  ['Huelva',37.26,-6.95],['Sevilla',37.39,-5.98],['Granada',37.18,-3.60],['Almería',36.84,-2.46],['Málaga',36.72,-4.42],['Cádiz',36.53,-6.29],
-  ['Ceuta',35.89,-5.32],['Melilla',35.29,-2.94],['Sta. Cruz de Tenerife',28.47,-16.25],['Las Palmas',28.12,-15.43],['Arrecife',28.96,-13.55],
-  ['Pto. del Rosario',28.50,-13.86],['S. Sebastián Gomera',28.09,-17.11],['Sta. Cruz de La Palma',28.68,-17.76],['Valverde',27.81,-17.92],
-];
 
 // ───────────────────────── estado ─────────────────────────
 const LS = {
@@ -376,6 +364,171 @@ function sumPrecip(m, from, to) {
 }
 function nearestIdx(s, t) { let bi = -1, bd = Infinity; s.t.forEach((x, i) => { const d = Math.abs(x - t); if (d < bd) { bd = d; bi = i; } }); return bd <= 3 * HOUR ? bi : -1; }
 
+// ───────────────────────── gráficos estilo Weawow ─────────────────────────
+const RI = { // iconos de cabecera de cada fila
+  temp: '<path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/><circle cx="12" cy="17.5" r="1.6" fill="currentColor"/>',
+  feel: '<path d="M8 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/><circle cx="18" cy="7" r="2"/><path d="M15 15c0-2 1.5-3 3-3s3 1 3 3"/>',
+  pop:  '<path d="M7 20l4-8M12 20l4-8M17 20l2-4"/><path d="M15 6.5l4-3M15 3.5h.01M19 6.5h.01" stroke-width="1.4"/>',
+  rain: '<path d="M6 20l5-9M11 20l5-9M16 20l3-5.5"/>',
+  wind: '<path d="M3 9h11a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M3 17h7"/>',
+  gust: '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7M3 20h4"/>',
+  hum:  '<path d="M12 3.5c3 4 6 7.3 6 10.5a6 6 0 0 1-12 0c0-3.2 3-6.5 6-10.5z"/>',
+};
+const rIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${RI[k]}</svg>`;
+const C_TEMP = '#e3a33a', C_MIN = '#7fb2ff', C_BLUE = '#4a9eff', C_GREY = '#c9ced6';
+const nf = (v, d = 0) => v == null ? '–' : String(round(v, d)).replace('.', ',');
+
+function circMean(dirs, w) {
+  let x = 0, y = 0;
+  dirs.forEach((d, i) => { if (d == null) return; const k = w?.[i] ?? 1; x += Math.cos(d * Math.PI / 180) * k; y += Math.sin(d * Math.PI / 180) * k; });
+  if (!x && !y) return null;
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+// probabilidad de precipitación por consenso: % de modelos con ≥0,1 mm en esa hora (y la de AEMET si existe)
+function popAt(t) {
+  const ms = active(); let n = 0, wet = 0, ae = null;
+  ms.forEach(m => { const s = S.data[m], i = at(s, t); if (i < 0) return; if (s.precip[i] != null) { n++; if (s.precip[i] >= 0.1) wet++; } if (m === 'aemet' && s.pop?.[i] != null) ae = s.pop[i]; });
+  if (!n && ae == null) return null;
+  const frac = n ? wet / n * 100 : null;
+  const v = ae != null && frac != null ? (frac + ae) / 2 : (ae ?? frac);
+  return Math.round(v / 5) * 5;
+}
+function dirAt(t) {
+  const d = [], w = [];
+  active().forEach(m => { const s = S.data[m], i = at(s, t); if (i >= 0 && s.dir[i] != null) { d.push(s.dir[i]); w.push(Math.max(1, s.wind[i] || 1)); } });
+  return circMean(d, w);
+}
+
+// Renderiza una tabla-gráfico desplazable horizontalmente
+// cols: [{top, icon, label}] · rows: [{key, title, unit, type:'line'|'dual'|'bars'|'arrows', v, v2, color, color2, fmt, h}]
+function chartTable(cols, rows, COL, center = false) {
+  const N = cols.length, W = N * COL, cx = (k) => k * COL + COL / 2;
+  let html = `<div class="hc${center ? ' ctr' : ''}"><div class="hc-in" style="width:${W}px;--col:${COL}px">`;
+  html += `<div class="hc-head">${cols.map(c => `<div style="width:${COL}px"><span class="hd">${c.top || '&nbsp;'}</span>${c.icon}<span class="hl">${c.label}</span></div>`).join('')}</div>`;
+  for (const r of rows) {
+    html += `<div class="hc-row">` + (r.type === 'arrows' ? '' : `<div class="hc-title">${rIcon(r.key)}<span>${r.title}</span><small>${r.unit || ''}</small></div>`);
+    const vals = (r.type === 'bars' ? r.v : r.v.concat(r.v2 || [])).filter(x => x != null);
+    if (r.type === 'arrows') {
+      html += `<div class="hc-arrows">${r.v.map(d => `<div style="width:${COL}px">${d == null ? '' : `<svg viewBox="0 0 24 24" style="transform:rotate(${(d + 180) % 360}deg)"><path d="M12 20V4M6 10l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`}</div>`).join('')}</div></div>`;
+      continue;
+    }
+    const H = r.h || 30, top = r.type === 'bars' && r.v2 ? 22 : 13, bot = r.type === 'dual' ? H - 13 : H - 2, base = r.type === 'dual' ? H - 1 : bot;
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (r.type === 'bars' || r.zero) lo = 0;
+    if (r.max != null) hi = Math.max(hi, r.max);
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (hi - lo < (r.minSpan || 1)) hi = lo + (r.minSpan || 1);
+    const Y = (v) => bot - (v - lo) / (hi - lo) * (bot - top);
+    const gid = 'g' + Math.random().toString(36).slice(2, 8);
+    let s = `<svg width="${W}" height="${H}" class="hc-svg"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${r.color}" stop-opacity=".45"/><stop offset="1" stop-color="${r.color}" stop-opacity="0"/></linearGradient></defs>`;
+    s += `<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="rgba(255,255,255,.12)"/>`;
+    if (r.type === 'bars') {
+      r.v.forEach((v, k) => {
+        if (v == null) return;
+        if (v > 0) s += `<rect x="${k * COL + COL * 0.28}" y="${Y(v)}" width="${COL * 0.44}" height="${bot - Y(v)}" rx="2" fill="${r.color}" opacity=".85"/>`;
+        s += `<text x="${cx(k)}" y="${(v > 0 ? Y(v) : bot) - 2}" class="${v > 0 ? 'on' : ''}">${r.fmt(v)}</text>`;
+      });
+      if (r.v2) r.v2.forEach((p, k) => { if (p != null) s += `<text x="${cx(k)}" y="8" class="sm" style="fill:${p >= 50 ? '#8cc4ff' : 'var(--mute)'}">${p}%</text>`; });
+    } else {
+      const series = r.type === 'dual' ? [[r.v, r.color, -3], [r.v2, r.color2, 11]] : [[r.v, r.color, -3]];
+      series.forEach(([arr, col, dy], si) => {
+        let d = '', first = null, lastX = null;
+        arr.forEach((v, k) => { if (v == null) return; const x = cx(k), y = Y(v); d += (first == null ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1); if (first == null) first = x; lastX = x; });
+        if (!d) return;
+        if (r.type !== 'dual') s += `<path d="${d}L${lastX} ${bot}L${first} ${bot}Z" fill="url(#${gid})"/>`;
+        else if (si === 0) { // banda entre máxima y mínima
+          const up = [], dn = [];
+          r.v.forEach((v, k) => { if (v != null && r.v2[k] != null) { up.push(`${cx(k)} ${Y(v)}`); dn.unshift(`${cx(k)} ${Y(r.v2[k])}`); } });
+          if (up.length) s += `<path d="M${up.join('L')}L${dn.join('L')}Z" fill="${r.color}" opacity=".16"/>`;
+        }
+        s += `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`;
+        arr.forEach((v, k) => { if (v != null) s += `<text x="${cx(k)}" y="${Y(v) + dy}">${r.fmt(v)}</text>`; });
+      });
+    }
+    html += s + '</svg></div>';
+  }
+  return html + '</div></div>';
+}
+
+function hourlyChart(now) {
+  const cols = [], R = { temp: [], feel: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [] };
+  const todayKey = fmt(now, { year: 'numeric', month: '2-digit', day: '2-digit' }), tomorrowKey = fmt(now + 864e5, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  for (let k = 0; k < 48; k++) {
+    const t = now + k * HOUR, temp = consensusAt(t, 'temp');
+    if (temp == null) continue;
+    const h = localHour(t), dkey = fmt(t, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const top = !cols.length ? (dkey === todayKey ? 'Hoy' : 'Mañana') : h === 0 ? (dkey === tomorrowKey ? 'Mañana' : fmt(t, { weekday: 'short' })) : '';
+    cols.push({ top, icon: icon(catAt(t), !dayAt(t)), label: k === 0 ? 'Ahora' : String(h).padStart(2, '0') });
+    R.temp.push(temp); R.feel.push(consensusAt(t, 'feel')); R.pop.push(popAt(t)); R.rain.push(consensusAt(t, 'precip'));
+    R.wind.push(consensusAt(t, 'wind')); R.dir.push(dirAt(t)); R.gust.push(consensusAt(t, 'gust')); R.hum.push(consensusAt(t, 'hum'));
+  }
+  if (!cols.length) return '';
+  const rows = [
+    { key: 'temp', title: 'Temperatura', unit: '°C', type: 'line', v: R.temp, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 30 },
+    { key: 'feel', title: 'Sensación térmica', unit: '°C', type: 'line', v: R.feel, color: C_TEMP, fmt: v => Math.round(v) + '°', minSpan: 4, h: 30 },
+    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 2, h: 36 },
+    { key: 'wind', title: 'Viento', unit: 'km/h', type: 'line', v: R.wind, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
+    { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
+    { key: 'gust', title: 'Ráfagas', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
+    { key: 'hum', title: 'Humedad', unit: '%', type: 'line', v: R.hum, color: C_BLUE, fmt: v => Math.round(v), zero: true, max: 100 },
+  ];
+  return chartTable(cols, rows, 46);
+}
+
+// Previsión diaria: agregados por modelo y día, y mediana entre modelos
+function dailyChart() {
+  const ms = active(); if (!ms.length) return '';
+  const dk = (t) => fmt(t, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const days = new Map(); // key -> {t (mediodía), per: {m: agregados}}
+  for (const m of ms) {
+    const s = S.data[m], by = new Map();
+    s.t.forEach((t, i) => { const k = dk(t); if (!by.has(k)) by.set(k, []); by.get(k).push(i); });
+    for (const [k, idx] of by) {
+      if (idx.length < 12) continue;
+      const pick = (f) => idx.map(i => s[f][i]).filter(v => v != null);
+      const T = pick('temp'), F = pick('feel'), P = pick('precip'), Wn = pick('wind'), G = pick('gust'), Hm = pick('hum');
+      if (!T.length) continue;
+      if (!days.has(k)) days.set(k, { t: s.t[idx[Math.floor(idx.length / 2)]], per: {} });
+      days.get(k).per[m] = {
+        tmax: Math.max(...T), tmin: Math.min(...T), fmax: F.length ? Math.max(...F) : null, fmin: F.length ? Math.min(...F) : null,
+        rain: P.length ? P.reduce((a, b) => a + b, 0) : null, wind: Wn.length ? Math.max(...Wn) : null, gust: G.length ? Math.max(...G) : null,
+        hum: Hm.length ? Hm.reduce((a, b) => a + b, 0) / Hm.length : null,
+        dir: circMean(idx.map(i => s.dir[i]), idx.map(i => s.wind[i] || 1)),
+        wet: P.filter(v => v >= 0.1).length / Math.max(1, P.length),
+      };
+    }
+  }
+  const today = dk(Date.now()), tomorrow = dk(Date.now() + 864e5);
+  const keys = [...days.keys()].sort((x, y) => days.get(x).t - days.get(y).t)
+    .filter(k => days.get(k).t >= floorHour(Date.now()) - 12 * HOUR).slice(0, 8);
+  const cols = [], R = { tmax: [], tmin: [], fmax: [], fmin: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [] };
+  for (const k of keys) {
+    const d = days.get(k), per = Object.values(d.per), med = (f) => median(per.map(x => x[f]));
+    // icono del día: estado más frecuente entre 8 y 20 h; si hay lluvia/tormenta/nieve 3 h o más, manda
+    const cnt = {};
+    for (let h = 8; h <= 20; h++) { const t = zoned(k.split('/').reverse().join('-'), h, S.tz); const c = catAt(t); if (c) cnt[c] = (cnt[c] || 0) + 1; }
+    const wetCat = ['storm', 'snow', 'rain', 'drizzle'].find(c => (cnt[c] || 0) >= 3);
+    const cat = wetCat || Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]?.[0] || 'partly';
+    // probabilidad diaria: máximo de la probabilidad horaria de consenso en el día
+    let pmax = null; for (let h = 0; h < 24; h++) { const p = popAt(zoned(k.split('/').reverse().join('-'), h, S.tz)); if (p != null) pmax = Math.max(pmax ?? 0, p); }
+    cols.push({ top: k === today ? 'Hoy' : k === tomorrow ? 'Mañana' : fmt(d.t, { weekday: 'short' }), icon: icon(cat, false), label: fmt(d.t, { day: 'numeric' }) + `<small>${per.length} mod.</small>` });
+    R.tmax.push(med('tmax')); R.tmin.push(med('tmin')); R.fmax.push(med('fmax')); R.fmin.push(med('fmin'));
+    R.pop.push(pmax); R.rain.push(med('rain')); R.wind.push(med('wind')); R.gust.push(med('gust')); R.hum.push(med('hum'));
+    R.dir.push(circMean(per.map(x => x.dir)));
+  }
+  if (!cols.length) return '';
+  const rows = [
+    { key: 'temp', title: 'Temperatura máx. / mín.', unit: '°C', type: 'dual', v: R.tmax, v2: R.tmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 44, minSpan: 6 },
+    { key: 'feel', title: 'Sensación máx. / mín.', unit: '°C', type: 'dual', v: R.fmax, v2: R.fmin, color: C_TEMP, color2: C_MIN, fmt: v => Math.round(v) + '°', h: 44, minSpan: 6 },
+    { key: 'rain', title: 'Precipitación', unit: 'probabilidad % · mm', type: 'bars', v: R.rain.map(v => v == null ? null : round(v, 1)), v2: R.pop, color: C_BLUE, fmt: v => nf(v, 1), max: 5, h: 36 },
+    { key: 'wind', title: 'Viento máx.', unit: 'km/h', type: 'line', v: R.wind, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
+    { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
+    { key: 'gust', title: 'Ráfagas máx.', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
+    { key: 'hum', title: 'Humedad media', unit: '%', type: 'line', v: R.hum, color: C_BLUE, fmt: v => Math.round(v), zero: true, max: 100 },
+  ];
+  return chartTable(cols, rows, 56, true);
+}
+
 // ───────────────────────── render: Ahora ─────────────────────────
 function renderNow() {
   const v = $('#v-now');
@@ -399,17 +552,11 @@ function renderNow() {
   <div class="d">${CAT_TXT[cat] || '—'}</div>
   ${hi != null ? `<div class="hl num">Máx. ${fmtT(hi)} · Mín. ${fmtT(lo)}</div>` : ''}
   <div class="sub num">Sensación ${fmtT(feel)} · Viento ${wind == null ? '–' : Math.round(wind)} km/h · Humedad ${hum == null ? '–' : Math.round(hum)}%</div>
-  <div><div class="agree"><i style="background:${ag[1]}"></i>Coincidencia ${ag[0].toLowerCase()} · ${temps.length} modelos · ±${round(spread / 2, 1).toString().replace('.', ',')}°</div></div>
-  <svg class="scroll-hint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>`;
+  <div><div class="agree"><i style="background:${ag[1]}"></i>Coincidencia ${ag[0].toLowerCase()} · ${temps.length} modelos · ±${round(spread / 2, 1).toString().replace('.', ',')}°</div></div></div>`;
 
-  // próximas 24 h (consenso)
-  html += `<div class="sec"><h3>Próximas horas · consenso</h3><div class="card strip">`;
-  for (let k = 0; k < 24; k++) {
-    const t = now + k * HOUR; const tc = consensusAt(t, 'temp'); if (tc == null) continue;
-    const p = consensusAt(t, 'precip'); const c = catAt(t);
-    html += `<div class="h num">${k ? hh(t) : 'Ahora'}${icon(c, !dayAt(t))}<b>${fmtT(tc)}</b><div class="p">${p >= 0.1 ? round(p, 1).toString().replace('.', ',') : ''}</div></div>`;
-  }
-  html += `</div></div>`;
+  // próximas horas y días (consenso entre modelos)
+  html += `<div class="sec"><h3>Próximas horas · consenso</h3><div class="card wchart">${hourlyChart(now)}</div></div>`;
+  html += `<div class="sec"><h3>Próximos días · consenso</h3><div class="card wchart">${dailyChart()}</div></div>`;
 
   html += renderExtras(now);
 
@@ -636,26 +783,18 @@ function renderMG() {
 }
 
 // ───────────────────────── render: Mapa ─────────────────────────
-const MAP = { map: null, marker: null, labels: null, radar: null, radarOn: false, frames: [], play: null, model: LS.get('mapModel', 'arome'), cache: {} };
-const MAP_MODELS = { arome: 'AROME', ecmwf: 'ECMWF', icon: 'ICON' };
+const MAP = { map: null, marker: null, labels: null, radar: null, radarOn: false, frames: [], play: null, radarAt: 0, model: LS.get('mapModel', 'arome'), cache: {} };
 function initMap() {
-  const seg = $('#mapmodel');
-  if (!seg.children.length) {
-    seg.innerHTML = Object.entries(MAP_MODELS).map(([k, n]) => `<button data-m="${k}" class="${k === MAP.model ? 'on' : ''}">${n}</button>`).join('');
-    seg.querySelectorAll('button').forEach(b => b.onclick = () => { MAP.model = b.dataset.m; LS.set('mapModel', MAP.model); seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); loadMapTemps(); });
-  }
-  if (MAP.map) return;
+  if (MAP.map) { if (Date.now() - MAP.radarAt > 10 * 60e3) loadRadar(); return; }
   if (!window.L) { toast('El mapa necesita conexión la primera vez'); return; }
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   MAP.map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 12 }).setView([40.2, -3.6], 5);
   baseLayers(dark).forEach(l => l.addTo(MAP.map));
-  MAP.labels = L.layerGroup().addTo(MAP.map);
   MAP.map.on('click', (e) => setLocation({ lat: e.latlng.lat, lon: e.latlng.lng, name: null }));
   placeMarker();
-  $('#mapt').oninput = () => { if (MAP.radarOn) { stopPlay(); showFrame(+$('#mapt').value); } else drawMapTemps(); };
+  $('#mapt').oninput = () => { stopPlay(); showFrame(+$('#mapt').value); };
   $('#play').onclick = togglePlay; $('#play').innerHTML = PLAY_ICON;
-  $('#radar').onclick = toggleRadar;
-  loadMapTemps();
+  loadRadar();
 }
 // Cartografía base: CARTO si hay clave (gratuita, carto.com/basemaps/apikey); si no, Esri Canvas, que no necesita clave
 function baseLayers(dark) {
@@ -674,77 +813,36 @@ function placeMarker() {
   if (!MAP.marker) MAP.marker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), zIndexOffset: 1000 }).addTo(MAP.map);
   else MAP.marker.setLatLng(ll);
 }
-// Dominio de AROME en Open-Meteo: no llega al sur de ~37,85° N (Sevilla, Málaga, Granada, Almería, Cádiz,
-// Huelva, Jaén, Ceuta, Melilla) ni a Canarias. Si se incluye un punto fuera, la petición entera falla.
-const inArome = (c) => c[1] >= 37.85;
-async function loadMapTemps() {
-  const m = MAP.model;
-  const fresh = MAP.cache[m] && Date.now() - MAP.cache[m].at < 30 * 60e3;
-  if (!fresh) {
-    const idx = CITIES.map((c, i) => i).filter(i => m !== 'arome' || inArome(CITIES[i]));
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${idx.map(i => CITIES[i][1]).join(',')}&longitude=${idx.map(i => CITIES[i][2]).join(',')}`
-        + `&hourly=temperature_2m,weather_code,is_day&models=${OM_MODELS[m]}&forecast_hours=48&timeformat=unixtime&timezone=auto`;
-      const j = await getJSON(url);
-      MAP.cache[m] = { at: Date.now(), idx, list: Array.isArray(j) ? j : [j] };
-    } catch { toast('No se pudo cargar el mapa de temperaturas'); return; }
-  }
-  drawMapTemps();
-}
-function drawMapTemps() {
-  if (MAP.radarOn) return;
-  const c = MAP.cache[MAP.model]; if (!c || !MAP.labels) return;
-  const k = +$('#mapt').value;
-  const t0 = floorHour(Date.now()) + k * HOUR;
-  MAP.labels.clearLayers();
-  c.list.forEach((r, n) => {
-    if (!r.hourly) return;
-    const city = CITIES[c.idx[n]];
-    const i = r.hourly.time.findIndex(ts => ts * 1000 >= t0);
-    const v = i < 0 ? null : r.hourly.temperature_2m[i];
-    if (v == null) return;
-    const html = `<div class="tlab num">${icon(catWMO(r.hourly.weather_code[i]), r.hourly.is_day?.[i] === 0)}${Math.round(v)}°</div>`;
-    L.marker([city[1], city[2]], { icon: L.divIcon({ className: '', html, iconSize: [0, 0] }), interactive: false }).addTo(MAP.labels);
-  });
-  $('#mapt-l').innerHTML = k === 0 ? '<b>Ahora</b>' : `<b>${fmt(t0, { weekday: 'short' })} ${hh(t0)}</b> · +${k} h`;
-  $('#mapt-r').textContent = MAP.model === 'arome' ? 'AROME: sin sur ni Canarias' : '+48 h';
-}
-
 // Radar (RainViewer): solo ofrece las últimas 2 horas, en imágenes cada 10 minutos; no hay predicción.
 function setSlider(min, max, val) { const r = $('#mapt'); r.min = min; r.max = max; r.value = val; }
 function showFrame(k) {
   MAP.frames.forEach((f, i) => f.layer.setOpacity(i === k ? 0.75 : 0));
   const f = MAP.frames[k]; if (!f) return;
   const ago = Math.round((Date.now() - f.time) / 60e3);
-  $('#mapt-l').innerHTML = `<b>${fmt(f.time, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</b>${k === MAP.frames.length - 1 ? ' · último' : ` · hace ${ago} min`}`;
-  $('#mapt-r').textContent = 'Radar · últimas 2 h';
+  $('#mapt-l').innerHTML = `<b>${fmt(f.time, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</b>${k === MAP.frames.length - 1 ? ' · última imagen' : ` · hace ${ago} min`}`;
 }
-function stopPlay() { clearInterval(MAP.play); MAP.play = null; $('#play').innerHTML = PLAY_ICON; }
 const PLAY_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.8v10.4L12 7z"/></svg>';
 const PAUSE_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="2.5" y="2" width="3" height="10" rx="1"/><rect x="8.5" y="2" width="3" height="10" rx="1"/></svg>';
+function stopPlay() { clearInterval(MAP.play); MAP.play = null; $('#play').innerHTML = PLAY_ICON; }
 function togglePlay() {
   if (MAP.play) return stopPlay();
+  if (!MAP.frames.length) return;
   $('#play').innerHTML = PAUSE_ICON;
   MAP.play = setInterval(() => { const r = $('#mapt'); const v = (+r.value + 1) % MAP.frames.length; r.value = v; showFrame(v); }, 700);
 }
-async function toggleRadar() {
-  MAP.radarOn = !MAP.radarOn; $('#radar').classList.toggle('on', MAP.radarOn);
-  $('.mapbar').classList.toggle('radar', MAP.radarOn);
+async function loadRadar() {
   stopPlay();
-  (MAP.frames || []).forEach(f => MAP.map.removeLayer(f.layer)); MAP.frames = [];
-  if (!MAP.radarOn) {
-    MAP.labels.addTo(MAP.map); setSlider(0, 47, 0); drawMapTemps(); return;
-  }
-  MAP.map.removeLayer(MAP.labels);
   try {
     const j = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
-    const past = [...(j.radar?.past || []), ...(j.radar?.nowcast || [])];
-    if (!past.length) throw new Error('vacío');
-    MAP.frames = past.map(f => ({ time: f.time * 1000,
+    const frames = [...(j.radar?.past || []), ...(j.radar?.nowcast || [])];
+    if (!frames.length) throw new Error('vacío');
+    MAP.frames.forEach(f => MAP.map.removeLayer(f.layer));
+    MAP.frames = frames.map(f => ({ time: f.time * 1000,
       layer: L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxNativeZoom: 7, maxZoom: 12, attribution: 'Radar © RainViewer' }).addTo(MAP.map) }));
+    MAP.radarAt = Date.now();
     setSlider(0, MAP.frames.length - 1, MAP.frames.length - 1);
     showFrame(MAP.frames.length - 1);
-  } catch { toast('Radar no disponible'); MAP.radarOn = false; $('#radar').classList.remove('on'); $('.mapbar').classList.remove('radar'); MAP.labels.addTo(MAP.map); }
+  } catch { toast('Radar no disponible'); $('#mapt-l').textContent = 'Sin radar'; }
 }
 
 // ───────────────────────── navegación / UI ─────────────────────────
@@ -837,7 +935,7 @@ $('#sheet-bg').onclick = closeSheets;
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $('#place').onclick = openLocSheet;
 $('#btn-fav').onclick = toggleFav;
-$('#btn-refresh').onclick = () => { load(true); if (MAP.map) { MAP.cache = {}; loadMapTemps(); } };
+$('#btn-refresh').onclick = () => { load(true); if (MAP.map) loadRadar(); };
 $('#btn-gps').onclick = () => {
   if (!navigator.geolocation) return toast('Geolocalización no disponible');
   navigator.geolocation.getCurrentPosition(p => setLocation({ lat: p.coords.latitude, lon: p.coords.longitude, name: null }),
