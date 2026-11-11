@@ -230,6 +230,38 @@ async function fetchAir(lat, lon) {
 const AQI = [[20, 'Buena', '#50c8a0'], [40, 'Razonable', '#4fb05a'], [60, 'Moderada', '#e8c33a'], [80, 'Mala', '#f08a3c'], [100, 'Muy mala', '#e0453a'], [Infinity, 'Extremadamente mala', '#8e3a8f']];
 const aqiLevel = (v) => AQI.find(a => v <= a[0]);
 
+// Índice UV (Open-Meteo, basado en GFS): actual, horario y máximo diario
+async function fetchUV(lat, lon) {
+  const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
+    + `&current=uv_index&hourly=uv_index&daily=uv_index_max&forecast_days=8&timezone=auto&timeformat=unixtime`);
+  return { cur: j.current?.uv_index ?? null, t: (j.hourly?.time || []).map(x => x * 1000), v: j.hourly?.uv_index || [],
+    dt: (j.daily?.time || []).map(x => x * 1000), dmax: j.daily?.uv_index_max || [] };
+}
+const UVL = [[2, 'Bajo', '#4cbb5e'], [5, 'Moderado', '#e8c12f'], [7, 'Alto', '#f08a2c'], [10, 'Muy alto', '#e0453a'], [Infinity, 'Extremo', '#a55ad6']];
+const uvLevel = (v) => UVL.find(x => Math.round(v) <= x[0]);
+function uvAt(t) { const u = S.uv; if (!u) return null; const i = u.t.indexOf(t); return i < 0 ? null : u.v[i]; }
+
+// Normales climáticas 1991-2020 (archivo ERA5 de Open-Meteo): media diaria de máx/mín suavizada a 15 días.
+// Se descargan una vez por ubicación y se guardan en el teléfono.
+const DOY = (ms) => { const p = fmt(ms, { month: 'numeric', day: 'numeric' }).split('/').map(Number); const d = new Date(Date.UTC(2001, p[1] - 1, p[0])); return Math.round((d - Date.UTC(2001, 0, 1)) / 864e5); }; // 0..364 (29-feb cuenta como 28-feb)
+async function fetchNormals(lat, lon) {
+  const key = 'normals.' + lat.toFixed(1) + ',' + lon.toFixed(1);
+  const c = LS.get(key, null); if (c) return c;
+  const j = await getJSON(`https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}`
+    + `&start_date=1991-01-01&end_date=2020-12-31&daily=temperature_2m_max,temperature_2m_min&timezone=auto`);
+  const sx = Array(365).fill(0), sn = Array(365).fill(0), n = Array(365).fill(0);
+  j.daily.time.forEach((d, i) => {
+    const [y, m, dd] = d.split('-').map(Number); const k = Math.min(364, Math.round((Date.UTC(2001, m - 1, m === 2 && dd === 29 ? 28 : dd) - Date.UTC(2001, 0, 1)) / 864e5));
+    const x = j.daily.temperature_2m_max[i], mn = j.daily.temperature_2m_min[i];
+    if (x != null && mn != null) { sx[k] += x; sn[k] += mn; n[k]++; }
+  });
+  const mx0 = sx.map((s, k) => s / (n[k] || 1)), mn0 = sn.map((s, k) => s / (n[k] || 1));
+  const smooth = (arr) => arr.map((_, k) => { let s = 0; for (let d = -7; d <= 7; d++) s += arr[(k + d + 365) % 365]; return Math.round(s / 15 * 10) / 10; });
+  const out = { mx: smooth(mx0), mn: smooth(mn0) };
+  LS.set(key, out);
+  return out;
+}
+
 // Salida y puesta del sol (algoritmo astronómico de SunCalc / NOAA, sin red)
 function sunTimes(ms, lat, lon) {
   const rad = Math.PI / 180, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397, J0 = 0.0009;
@@ -277,7 +309,7 @@ async function load(force = false) {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
   const cache = LS.get('cache', null);
   if (!force && cache && cache.key === key && Date.now() - cache.at < 20 * 60e3) {
-    S.data = cache.data; S.status = cache.status; S.tz = cache.tz; S.air = cache.air; S.fetchedAt = cache.at; render(); return;
+    S.data = cache.data; S.status = cache.status; S.tz = cache.tz; S.air = cache.air; S.uv = cache.uv; S.fetchedAt = cache.at; render(); loadNormals(); return;
   }
   $('#pstat').textContent = 'Actualizando…';
   S.status = {};
@@ -286,13 +318,20 @@ async function load(force = false) {
     S.enabled.aemet ? fetchAEMET(lat, lon).then(r => ({ aemet: r }), e => { S.status.aemet = e.message === 'nokey' ? 'Añade la API key en Ajustes' : e.message === 'lejos' ? 'Sin municipio cercano' : (e instanceof TypeError ? 'Bloqueado (CORS): usa proxy' : 'Error: ' + e.message); return {}; }) : Promise.resolve({}),
   ];
   const airJob = fetchAir(lat, lon).then(a => { S.air = a; }, () => { S.air = null; });
-  const res = await Promise.all(jobs); await airJob;
+  const uvJob = fetchUV(lat, lon).then(u => { S.uv = u; }, () => { S.uv = null; });
+  const res = await Promise.all(jobs); await airJob; await uvJob;
   S.data = Object.assign({}, ...res);
   for (const m of ORDER) if (!S.enabled[m]) S.status[m] = 'Desactivado';
   S.fetchedAt = Date.now();
-  if (Object.keys(S.data).length) LS.set('cache', { key, at: S.fetchedAt, data: S.data, status: S.status, tz: S.tz, air: S.air });
-  else if (cache && cache.key === key) { S.data = cache.data; S.tz = cache.tz; S.air = cache.air; S.fetchedAt = cache.at; toast('Sin conexión: mostrando la última predicción'); }
+  if (Object.keys(S.data).length) LS.set('cache', { key, at: S.fetchedAt, data: S.data, status: S.status, tz: S.tz, air: S.air, uv: S.uv });
+  else if (cache && cache.key === key) { S.data = cache.data; S.tz = cache.tz; S.air = cache.air; S.uv = cache.uv; S.fetchedAt = cache.at; toast('Sin conexión: mostrando la última predicción'); }
   render();
+  loadNormals();
+}
+
+async function loadNormals() {
+  const loc = S.loc;
+  try { const n = await fetchNormals(loc.lat, loc.lon); if (loc === S.loc) { S.normals = n; renderNow(); } } catch { S.normals = null; }
 }
 
 // ───────────────────────── consenso ─────────────────────────
@@ -326,6 +365,7 @@ const RI = { // iconos de cabecera de cada fila
   wind: '<path d="M3 9h11a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M3 17h7"/>',
   gust: '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7M3 20h4"/>',
   hum:  '<path d="M12 3.5c3 4 6 7.3 6 10.5a6 6 0 0 1-12 0c0-3.2 3-6.5 6-10.5z"/>',
+  uv:   '<circle cx="12" cy="12" r="3.5"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
 };
 const rIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${RI[k]}</svg>`;
 const C_TEMP = '#e3a33a', C_MIN = '#7fb2ff', C_BLUE = '#4a9eff', C_GREY = '#c9ced6';
@@ -357,7 +397,13 @@ function dirAt(t) {
 function chartTable(cols, rows, COL, center = false) {
   const N = cols.length, W = N * COL, cx = (k) => k * COL + COL / 2;
   let html = `<div class="hc${center ? ' ctr' : ''}"><div class="hc-in" style="width:${W}px;--col:${COL}px">`;
-  html += `<div class="hc-head">${cols.map(c => `<div style="width:${COL}px"><span class="hd">${c.top || '&nbsp;'}</span>${c.icon}<span class="hl">${c.label}</span></div>`).join('')}</div>`;
+  // franja de días: el nombre del día queda fijo a la izquierda hasta que termina ese día
+  const daySeg = cols[0].day !== undefined;
+  if (daySeg) {
+    const segs = []; cols.forEach(c => { if (!segs.length || segs.at(-1).day !== c.day) segs.push({ day: c.day, n: 0 }); segs.at(-1).n++; });
+    html += `<div class="hc-days">${segs.map(s => `<div style="width:${s.n * COL}px"><span>${s.day}</span></div>`).join('')}</div>`;
+  }
+  html += `<div class="hc-head">${cols.map(c => `<div style="width:${COL}px">${daySeg ? '' : `<span class="hd">${c.top || '&nbsp;'}</span>`}${c.icon}<span class="hl">${c.label}</span></div>`).join('')}</div>`;
   for (const r of rows) {
     html += `<div class="hc-row">` + (r.type === 'arrows' ? '' : `<div class="hc-title">${rIcon(r.key)}<span>${r.title}</span><small>${r.unit || ''}</small></div>`);
     const vals = (r.type === 'bars' ? r.v : r.v.concat(r.v2 || [])).filter(x => x != null);
@@ -378,7 +424,7 @@ function chartTable(cols, rows, COL, center = false) {
     if (r.type === 'bars') {
       r.v.forEach((v, k) => {
         if (v == null) return;
-        if (v > 0) s += `<rect x="${k * COL + COL * 0.28}" y="${Y(v)}" width="${COL * 0.44}" height="${bot - Y(v)}" rx="2" fill="${r.color}" opacity=".85"/>`;
+        if (v > 0) s += `<rect x="${k * COL + COL * 0.28}" y="${Y(v)}" width="${COL * 0.44}" height="${bot - Y(v)}" rx="2" fill="${r.colorFn ? r.colorFn(v) : r.color}" opacity=".85"/>`;
         s += `<text x="${cx(k)}" y="${(v > 0 ? Y(v) : bot) - 4}" class="${v > 0 ? 'on' : ''}">${r.fmt(v)}</text>`;
       });
       if (r.v2) r.v2.forEach((p, k) => { if (p != null) s += `<text x="${cx(k)}" y="11" class="sm" style="fill:${p >= 50 ? '#8cc4ff' : 'var(--mute)'}">${p}%</text>`; });
@@ -418,15 +464,15 @@ function modelSrc(m) {
 }
 function hourlyChart(now, m) {
   const src = m ? modelSrc(m) : CONS_SRC;
-  const cols = [], R = { temp: [], feel: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [] };
+  const cols = [], R = { temp: [], feel: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [], uv: [] };
   const todayKey = fmt(now, { year: 'numeric', month: '2-digit', day: '2-digit' }), tomorrowKey = fmt(now + 864e5, { year: 'numeric', month: '2-digit', day: '2-digit' });
   for (let k = 0; k < 48; k++) {
     const t = now + k * HOUR, temp = src.v('temp', t);
     if (temp == null) continue;
     const h = localHour(t), dkey = fmt(t, { year: 'numeric', month: '2-digit', day: '2-digit' });
-    const top = !cols.length ? (dkey === todayKey ? 'Hoy' : 'Mañana') : h === 0 ? (dkey === tomorrowKey ? 'Mañana' : fmt(t, { weekday: 'short' })) : '';
-    cols.push({ top, icon: icon(src.cat(t), src.night(t)), label: k === 0 ? 'Ahora' : String(h).padStart(2, '0') });
-    for (const f of Object.keys(R)) R[f].push(f === 'temp' ? temp : src.v(f, t));
+    const day = dkey === todayKey ? 'Hoy' : dkey === tomorrowKey ? 'Mañana' : fmt(t, { weekday: 'long' });
+    cols.push({ day, icon: icon(src.cat(t), src.night(t)), label: k === 0 ? 'Ahora' : String(h).padStart(2, '0') });
+    for (const f of Object.keys(R)) R[f].push(f === 'temp' ? temp : f === 'uv' ? (m ? null : uvAt(t)) : src.v(f, t));
   }
   if (!cols.length) return '<div class="note" style="padding:12px">Sin datos para las próximas horas.</div>';
   const hasPop = R.pop.some(p => p != null);
@@ -438,6 +484,7 @@ function hourlyChart(now, m) {
     { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
     { key: 'gust', title: 'Ráfagas', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'hum', title: 'Humedad', unit: '%', type: 'line', v: R.hum, color: C_BLUE, fmt: v => Math.round(v), zero: true, max: 100 },
+    { key: 'uv', title: 'Índice UV', unit: '', type: 'bars', v: R.uv.map(v => v == null ? null : Math.round(v)), colorFn: v => uvLevel(v)[2], fmt: v => Math.round(v), max: 8, h: 50 },
   ].filter(r => r.type === 'arrows' ? r.v.some(x => x != null) : r.v.some(x => x != null));
   return chartTable(cols, rows, 46);
 }
@@ -468,7 +515,7 @@ function dailyChart() {
   const today = dk(Date.now()), tomorrow = dk(Date.now() + 864e5);
   const keys = [...days.keys()].sort((x, y) => days.get(x).t - days.get(y).t)
     .filter(k => days.get(k).t >= floorHour(Date.now()) - 12 * HOUR).slice(0, 8);
-  const cols = [], R = { tmax: [], tmin: [], fmax: [], fmin: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [] };
+  const cols = [], R = { tmax: [], tmin: [], fmax: [], fmin: [], pop: [], rain: [], wind: [], dir: [], gust: [], hum: [], uv: [] };
   for (const k of keys) {
     const d = days.get(k), per = Object.values(d.per), med = (f) => median(per.map(x => x[f]));
     // icono del día: estado más frecuente entre 8 y 20 h; si hay lluvia/tormenta/nieve 3 h o más, manda
@@ -482,6 +529,7 @@ function dailyChart() {
     R.tmax.push(med('tmax')); R.tmin.push(med('tmin')); R.fmax.push(med('fmax')); R.fmin.push(med('fmin'));
     R.pop.push(pmax); R.rain.push(med('rain')); R.wind.push(med('wind')); R.gust.push(med('gust')); R.hum.push(med('hum'));
     R.dir.push(circMean(per.map(x => x.dir)));
+    const ui = S.uv ? S.uv.dt.findIndex(t => dk(t) === k) : -1; R.uv.push(ui < 0 ? null : S.uv.dmax[ui]);
   }
   if (!cols.length) return '';
   const rows = [
@@ -492,11 +540,25 @@ function dailyChart() {
     { key: 'wind', title: '', unit: '', type: 'arrows', v: R.dir },
     { key: 'gust', title: 'Ráfagas máx.', unit: 'km/h', type: 'line', v: R.gust, color: C_GREY, fmt: v => Math.round(v), zero: true, minSpan: 20 },
     { key: 'hum', title: 'Humedad media', unit: '%', type: 'line', v: R.hum, color: C_BLUE, fmt: v => Math.round(v), zero: true, max: 100 },
+    { key: 'uv', title: 'Índice UV máx.', unit: '', type: 'bars', v: R.uv.map(v => v == null ? null : Math.round(v)), colorFn: v => uvLevel(v)[2], fmt: v => Math.round(v), max: 8, h: 50 },
   ];
-  return chartTable(cols, rows, 56, true);
+  return chartTable(cols, rows.filter(r => r.v.some(x => x != null)), 56, true);
 }
 
 // ───────────────────────── render: Ahora ─────────────────────────
+// diferencia con la normal climática del día (máx. o mín.)
+function anom(v, f) {
+  const n = S.normals?.[f]?.[DOY(Date.now())]; if (n == null || v == null) return '';
+  const d = Math.round((v - n) * 10) / 10, cls = d > 0.4 ? 'up' : d < -0.4 ? 'dn' : 'eq';
+  return ` <span class="an ${cls}" title="Normal: ${nf(n, 1)}°">${d > 0 ? '+' : d < 0 ? '−' : '±'}${nf(Math.abs(d), 1)}°</span>`;
+}
+// UV y calidad del aire actuales
+function extraLine() {
+  const parts = [];
+  if (S.uv?.cur != null) { const l = uvLevel(S.uv.cur); parts.push(`<span><i style="background:${l[2]}"></i>UV ${Math.round(S.uv.cur)} · ${l[1].toLowerCase()}</span>`); }
+  const q = S.air?.cur?.european_aqi; if (q != null) { const l = aqiLevel(q); parts.push(`<span><i style="background:${l[2]}"></i>Aire ${Math.round(q)} · ${l[1].toLowerCase()}</span>`); }
+  return parts.length ? `<div class="xl num">${parts.join('')}</div>` : '';
+}
 function renderNow() {
   const v = $('#v-now');
   const ms = active();
@@ -517,7 +579,8 @@ function renderNow() {
     <div class="t num">${fmtT(ct)}</div>
     <div><div class="ico">${icon(cat, night)}</div></div></div>
   <div class="d">${CAT_TXT[cat] || '—'}</div>
-  ${hi != null ? `<div class="hl num">Máx. ${fmtT(hi)} · Mín. ${fmtT(lo)}</div>` : ''}
+  ${hi != null ? `<div class="hl num">Máx. ${fmtT(hi)}${anom(hi, 'mx')} · Mín. ${fmtT(lo)}${anom(lo, 'mn')}${S.normals ? '<span class="anl">vs. media 1991–2020</span>' : ''}</div>` : ''}
+  ${extraLine()}
   <div class="sub num">Sensación ${fmtT(feel)} · Viento ${wind == null ? '–' : Math.round(wind)} km/h · Humedad ${hum == null ? '–' : Math.round(hum)}%</div>
   <div><div class="agree"><i style="background:${ag[1]}"></i>Coincidencia ${ag[0].toLowerCase()} · ${temps.length} modelos · ±${round(spread / 2, 1).toString().replace('.', ',')}°</div></div></div>`;
 
@@ -565,7 +628,7 @@ function renderNow() {
       <div><span>Máxima</span><b>${rng(mx)}</b></div><div><span>Mínima</span><b>${rng(mn)}</b></div>
       <div><span>Lluvia</span><b>${(round(median(pr), 1) + ' mm').replace('.', ',')}</b></div></div></div>`;
   }
-  html += `<p class="note">Temperatura principal: mediana de los modelos disponibles. La coincidencia mide la dispersión de temperatura entre ellos ahora mismo.</p>`;
+  html += `<p class="note">Temperatura principal: mediana de los modelos disponibles. La coincidencia mide la dispersión de temperatura entre ellos ahora mismo. Índice UV: modelo GFS. Variación de máx./mín.: diferencia con la media de 1991–2020 para este día (reanálisis ERA5, rejilla de ~25 km, por lo que en costa o montaña puede desviarse algo).</p>`;
   v.innerHTML = html;
   v.querySelectorAll('[data-exp]').forEach(r => r.onclick = () => {
     const m = r.dataset.exp, box = $('#mc-' + m), open = !S.openModels.has(m);

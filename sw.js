@@ -1,6 +1,6 @@
 // Service worker de Cielo: app shell en caché, datos con red primero y respaldo en caché
-const V = 'cielo-v14';
-const SHELL = ['./', 'index.html', 'app.js', 'scene.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
+const V = 'cielo-v16';
+const SHELL = ['./', 'index.html', 'app.js', 'scene.js', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V) /* incluye la antigua caché de teselas */.map(k => caches.delete(k)))).then(() => self.clients.claim())); });

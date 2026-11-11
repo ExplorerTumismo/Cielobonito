@@ -11,8 +11,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cielo">
-<link rel="apple-touch-icon" href="icons/icon-180.png?v=2">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
@@ -246,6 +246,19 @@ body.scenic #v-now .sec h3,body.scenic #v-now .note{color:#fff;text-shadow:0 1px
 .hc-arrows{display:flex;padding:2px 0 3px}
 .hc-arrows div{display:grid;place-items:center}
 .hc-arrows svg{width:15px;height:15px}
+
+.hero-wrap .an{font-size:12.5px;font-weight:600;padding:1px 5px;border-radius:6px;margin-left:2px;vertical-align:1px}
+.hero-wrap .an.up{background:rgba(255,120,80,.28);color:#ffd2c2}
+.hero-wrap .an.dn{background:rgba(90,160,255,.28);color:#cfe3ff}
+.hero-wrap .an.eq{background:rgba(255,255,255,.16)}
+.hero-wrap .anl{display:block;font-size:11px;font-weight:500;color:var(--mute);margin-top:1px}
+.hero-wrap .xl{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:14px;font-weight:550;margin-top:4px}
+.hero-wrap .xl i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.hc-days{display:flex;padding-top:7px}
+.hc-days>div{flex:none}
+.hc-days>div+div{box-shadow:inset .5px 0 0 var(--line)}
+.hc-days span{position:sticky;left:0;display:inline-block;padding:0 8px;font-size:12px;font-weight:600;color:var(--mute);white-space:nowrap}
+.hc-days span::first-letter{text-transform:uppercase}
 .skel{color:var(--mute);text-align:center;padding:60px 0}
 .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -303,7 +316,7 @@ body.scenic #v-now .sec h3,body.scenic #v-now .note{color:#fff;text-shadow:0 1px
   <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:18px 0 6px">Modelos</h3>
   <div class="card" id="mtog"></div>
   <button class="btn pri" id="btn-save">Guardar</button>
-  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), ECMWF, DWD (ICON). Calidad del aire: Copernicus CAMS vía Open-Meteo. Radar: RainViewer. Mapa: Esri / © OpenStreetMap (o CARTO con clave).</p>
+  <p class="note">Datos: AEMET, Météo-France (AROME vía Open-Meteo), ECMWF, DWD (ICON). Calidad del aire: Copernicus CAMS vía Open-Meteo. Índice UV: GFS vía Open-Meteo. Normales 1991–2020: ERA5 vía Open-Meteo. Radar: RainViewer. Mapa: Esri / © OpenStreetMap (o CARTO con clave).</p>
 </div>
 <div class="toast" id="toast"></div>
 
