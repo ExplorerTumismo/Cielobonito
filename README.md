@@ -4,7 +4,7 @@ App web instalable (PWA) pensada para iPhone 17 (402 × 874 pt, Dynamic Island, 
 Compara varios modelos y predicciones para cualquier punto de España, Baleares, Canarias, Ceuta y Melilla.
 
 ## Pestañas
-- **Mapa** — radar de precipitación (RainViewer) de las últimas 2 horas, con deslizador y reproducción, centrado en tu ubicación. Toca el mapa para elegir otra.
+- **Mapa** — radar de precipitación (RainViewer) de las últimas 2 horas, con deslizador y reproducción, centrado en tu ubicación. La población se cambia desde el buscador o las favoritas.
 - **Ahora** — temperatura de consenso (mediana) y coincidencia entre modelos; gráficos de próximas 48 horas y próximos días (temperatura, sensación, probabilidad y mm de precipitación, viento con dirección, ráfagas, humedad); sol, calidad del aire, tormenta y valor de cada modelo.
 - **Meteograma** — hasta 7 días: temperatura (una línea por modelo + banda de dispersión), precipitación (mediana y máximo) y viento con rachas. Desliza el dedo para leer los valores hora a hora; toca las etiquetas para ocultar modelos.
 

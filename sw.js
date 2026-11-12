@@ -1,5 +1,5 @@
 // Service worker de Cielo: app shell en caché, datos con red primero y respaldo en caché
-const V = 'cielo-v16';
+const V = 'cielo-v17';
 const SHELL = ['./', 'index.html', 'app.js', 'scene.js', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

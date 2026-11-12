@@ -831,7 +831,6 @@ function initMap() {
   MAP.map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 11, zoomSnap: 0.5, bounceAtZoomLimits: false })
     .setView([S.loc.lat, S.loc.lon], 7); // x4 respecto a la vista de toda España (zoom 5)
   baseLayers(dark).forEach(l => l.addTo(MAP.map));
-  MAP.map.on('click', (e) => setLocation({ lat: e.latlng.lat, lon: e.latlng.lng, name: null }));
   placeMarker();
   $('#mapt').oninput = () => { stopPlay(); showFrame(+$('#mapt').value); };
   $('#play').onclick = togglePlay; $('#play').innerHTML = PLAY_ICON;
